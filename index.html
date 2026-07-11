@@ -227,9 +227,9 @@
                 </div>
                 ${finHtml}
                 <div class="metrics">
-                    <div class="metric"><div class="metric-label">本益比</div><div class="metric-value">${per&&per.PER?per.PER:'—'}</div></div>
-                    <div class="metric"><div class="metric-label">殖利率</div><div class="metric-value">${per&&per.dividend_yield?per.dividend_yield+'%':'—'}</div></div>
-                    <div class="metric"><div class="metric-label">股價淨值比</div><div class="metric-value">${per&&per.PBR?per.PBR:'—'}</div></div>
+                    <div class="metric"><div class="metric-label">本益比</div><div class="metric-value">${per&&per.PER!==null&&per.PER!==undefined?per.PER:'—'}</div></div>
+                    <div class="metric"><div class="metric-label">殖利率</div><div class="metric-value">${per&&per.dividend_yield!==null&&per.dividend_yield!==undefined?per.dividend_yield+'%':'—'}</div></div>
+                    <div class="metric"><div class="metric-label">股價淨值比</div><div class="metric-value">${per&&per.PBR!==null&&per.PBR!==undefined?per.PBR:'—'}</div></div>
                     <div class="metric"><div class="metric-label">MA20</div><div class="metric-value">${ma20?ma20.toFixed(1):'—'}</div></div>
                     <div class="metric"><div class="metric-label">MA60</div><div class="metric-value">${ma60?ma60.toFixed(1):'—'}</div></div>
                     <div class="metric"><div class="metric-label">RSI(14)</div><div class="metric-value">${rsiVal!==null?rsiVal:'—'}</div></div>
