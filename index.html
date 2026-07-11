@@ -190,7 +190,8 @@
             return {tags,summary:reasons.join('')||'依目前技術與基本面資料綜合判斷。',chg};
         }
         async function render(ticker){
-            const [rows,per,info,fin]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,10),getInfo(ticker),getFin(ticker)]);
+            const [rows,perArr,info,fin]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,30),getInfo(ticker),getFin(ticker)]);
+            const per = (perArr&&perArr.length)?perArr[perArr.length-1]:null;
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
