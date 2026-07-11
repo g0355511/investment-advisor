@@ -319,26 +319,58 @@
             }
             return r;
         }
-        function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal}){
+        function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry}){
             const chg=((close-prevClose)/prevClose*100);
             const tags=[],reasons=[];
+            const isFin = industry==='金融保險';
+            let techScore=0, fundScore=0;
+            // ===== 技術面 =====
             if(ma20&&ma60){
-                if(close>ma20&&ma20>ma60){tags.push(['多頭排列','tag-pos']);reasons.push('股價站穩月線與季線之上，中長期趨勢偏多。');}
-                else if(close<ma20&&ma20<ma60){tags.push(['空頭排列','tag-warn']);reasons.push('股價跌破月線與季線，短期留意下行風險。');}
-                else {tags.push(['盤整格局','tag-neu']);reasons.push('均線糾結，目前區間盤整，方向未明。');}
-            }
-            if(per&&per.PER){
-                if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`本益比 ${per.PER} 相對低位，具價值投資吸引力。`);}
-                else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`本益比 ${per.PER} 偏高，須注意評價合理性。`);}
-                else{tags.push(['本益比合理','tag-neu']);reasons.push(`本益比 ${per.PER} 中性區間，估值尚稱合理。`);}
+                if(close>ma20&&ma20>ma60){tags.push(['多頭排列','tag-pos']);reasons.push('【技術面】股價站穩月線與季線之上，中長期趨勢偏多。');techScore+=1;}
+                else if(close<ma20&&ma20<ma60){tags.push(['空頭排列','tag-warn']);reasons.push('【技術面】股價跌破月線與季線，短期留意下行風險。');techScore-=1;}
+                else {tags.push(['盤整格局','tag-neu']);reasons.push('【技術面】均線糾結，目前區間盤整，方向未明。');}
             }
             if(rsiVal!==null){
-                if(rsiVal>=70){tags.push(['RSI過熱','tag-warn']);reasons.push(`RSI ${rsiVal} 超買，短期或面臨賣壓。`);}
-                else if(rsiVal<=30){tags.push(['RSI超賣','tag-pos']);reasons.push(`RSI ${rsiVal} 超賣，具技術反彈條件。`);}
-                else{tags.push(['RSI中性','tag-neu']);reasons.push(`RSI ${rsiVal} 中性區間。`);}
+                if(rsiVal>=70){tags.push(['RSI過熱','tag-warn']);reasons.push(`【技術面】RSI ${rsiVal} 超買，短期或面臨賣壓。`);techScore-=1;}
+                else if(rsiVal<=30){tags.push(['RSI超賣','tag-pos']);reasons.push(`【技術面】RSI ${rsiVal} 超賣，具技術反彈條件。`);techScore+=1;}
+                else{tags.push(['RSI中性','tag-neu']);reasons.push(`【技術面】RSI ${rsiVal} 中性區間。`);}
             }
-            if(per&&per.dividend_yield&&per.dividend_yield>=4){tags.push(['高殖利率','tag-pos']);reasons.push(`殖利率約 ${per.dividend_yield}%，適合穩定現金流。`);}
-            return {tags,summary:reasons.join('')||'依目前技術與基本面資料綜合判斷。',chg};
+            // ===== 基本面 =====
+            if(ratios){
+                const R=ratios;
+                // 獲利能力：ROE / ROA
+                if(R.roe!=null){
+                    if(R.roe>=15){tags.push(['ROE佳','tag-pos']);reasons.push(`【基本面】權益報酬率 ROE ${R.roe.toFixed(1)}%，獲利能力優於多數企業，基本面強勁。`);fundScore+=1;}
+                    else if(R.roe<8){tags.push(['ROE偏弱','tag-warn']);reasons.push(`【基本面】權益報酬率 ROE ${R.roe.toFixed(1)}%，股東權益報酬偏低，獲利效率待加強。`);fundScore-=1;}
+                    else{tags.push(['ROE平穩','tag-neu']);reasons.push(`【基本面】權益報酬率 ROE ${R.roe.toFixed(1)}%，處中性水準。`);}
+                }
+                if(R.roa!=null && R.roa>=isFin?1:5){tags.push(['資產效率高','tag-pos']);reasons.push(`【基本面】總資產報酬率 ROA ${R.roa.toFixed(2)}%，資產運用效率良好。`);fundScore+=1;}
+                else if(R.roa!=null && R.roa<(isFin?0.1:2)){tags.push(['資產效率低','tag-warn']);reasons.push(`【基本面】總資產報酬率 ROA ${R.roa.toFixed(2)}%，資產運用效率偏低。`);fundScore-=1;}
+                // 財務結構：負債比
+                if(R.debtRatio!=null){
+                    if(R.debtRatio>60){tags.push(['負債偏高','tag-warn']);reasons.push(`【基本面】負債比率 ${R.debtRatio.toFixed(1)}%，財務槓桿偏高，須留意償債與利息負擔。`);fundScore-=1;}
+                    else if(R.debtRatio<40){tags.push(['財務穩健','tag-pos']);reasons.push(`【基本面】負債比率 ${R.debtRatio.toFixed(1)}%，財務結構穩健。`);fundScore+=1;}
+                    else{tags.push(['財務適中','tag-neu']);reasons.push(`【基本面】負債比率 ${R.debtRatio.toFixed(1)}%，槓桿適中。`);}
+                }
+                // 獲利品質：純益率 / 金融業 NIM
+                if(isFin && R.nim!=null){ reasons.push(`【基本面】淨利差 NIM ${R.nim.toFixed(2)}%，為金控本業獲利核心指標。`); }
+                else if(R.netMargin!=null){ reasons.push(`【基本面】純益率 ${R.netMargin.toFixed(1)}%，反映本業獲利品質。`); }
+            }
+            // 評價（本益比/殖利率）
+            if(per&&per.PER){
+                if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。`);fundScore+=1;}
+                else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。`);fundScore-=1;}
+                else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。`);}
+            }
+            if(per&&per.dividend_yield&&per.dividend_yield>=4){tags.push(['高殖利率','tag-pos']);reasons.push(`【評價】殖利率約 ${per.dividend_yield}%，適合穩定現金流。`);fundScore+=1;}
+            // 綜合結論
+            let verdict;
+            if(techScore>0 && fundScore>0) verdict='技術面與基本面相互印證，均偏多頭，可列入觀察名單並分批佈局。';
+            else if(techScore>0 && fundScore<=0) verdict='技術面轉強，但基本面尚弱，建議等待基本面改善訊號再行介入。';
+            else if(techScore<=0 && fundScore>0) verdict='基本面穩健優質，但技術面偏弱，可逢拉回分批承接、採取左側布局。';
+            else verdict='技術面與基本面均偏弱，建議審慎觀望、控制部位。';
+            reasons.push(verdict);
+            return {tags,summary:reasons.join(''),chg};
         }
         async function render(ticker){
             const [rows,perArr,info]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,30),getInfo(ticker)]);
@@ -353,7 +385,7 @@
             const closes=rows.map(r=>r.close);
             const ma20=ma(closes,20),ma60=ma(closes,60),rsiVal=rsi(closes);
             const close=last.close,prevClose=prev.close;
-            const {tags,summary,chg}=buildAdvice({close,prevClose,per,ma20,ma60,rsiVal});
+            const {tags,summary,chg}=buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry:isFinance?'金融保險':'—'});
             const cc=chg>0?'up':(chg<0?'down':'flat'); const sign=chg>0?'+':'';
             const name=info?info.stock_name:ticker;
             const industry=info?info.industry_category:'—';
