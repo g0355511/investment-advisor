@@ -321,17 +321,30 @@
             }
             return r;
         }
-        // 同業基準：從 STOCK_DB 讀本地 per（避免 FinMind 在瀏覽器環境偶發空回應）
+        // 同業基準：用全市場產業對照(本地 industry_map.json) 找同業所有代號，並行抓 PER 算中位數
+        let INDUSTRY_MAP=null;
+        async function loadIndustryMap(){
+            if(INDUSTRY_MAP) return INDUSTRY_MAP;
+            try{ const r=await fetch('industry_map.json'); INDUSTRY_MAP=await r.json(); }
+            catch(e){ INDUSTRY_MAP={}; }
+            return INDUSTRY_MAP;
+        }
         async function getIndustryBench(ticker){
-            if(!STOCK_DB) return null;
-            const self=STOCK_DB.find(s=>s.code===ticker);
-            if(!self) return null;
-            const industry=self.industry;
-            const peers=STOCK_DB.filter(s=>s.industry===industry && s.code!==ticker && s.per>0);
-            if(peers.length<1) return null;
-            const vals=peers.map(s=>s.per).sort((a,b)=>a-b);
-            const mid=vals[Math.floor(vals.length/2)];
-            return { median:mid, n:vals.length, industry };
+            const map=await loadIndustryMap();
+            if(!map || !map[ticker]) return null;
+            const industry=map[ticker];
+            // 同業代號（排除自身，最多取 40 檔以控時效）
+            let peers=Object.entries(map).filter(([c,ind])=>ind===industry && c!==ticker).map(([c])=>c);
+            if(peers.length<3) return { median:null, n:peers.length, industry, note:'同業樣本過少' };
+            if(peers.length>40) peers=peers.sort(()=>Math.random()-0.5).slice(0,40);
+            try{
+                const pers=await Promise.all(peers.map(c=>getJSON('TaiwanStockPER',c,1)));
+                const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0&&v<200);
+                if(vals.length<3) return { median:null, n:vals.length, industry, note:'有效樣本過少' };
+                vals.sort((a,b)=>a-b);
+                const mid=vals[Math.floor(vals.length/2)];
+                return { median:mid, n:vals.length, industry, totalPeers:peers.length };
+            }catch(e){ return null; }
         }
         function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry,bench,volatility}){
             const chg=((close-prevClose)/prevClose*100);
@@ -373,16 +386,17 @@
             // 評價（本益比/殖利率）
             if(per&&per.PER){
                 let benchTxt='';
-                if(bench&&bench.median){ benchTxt=`（同業「${bench.industry}」中位數約 ${bench.median.toFixed(1)}，樣本 ${bench.n} 檔）`; }
+                if(bench&&bench.median){ benchTxt=`（同業「${bench.industry}」中位數約 ${bench.median.toFixed(1)}，樣本 ${bench.n}/${bench.totalPeers||bench.n} 檔）`; }
+                else if(bench&&bench.note){ benchTxt=`（同業「${bench.industry}」${bench.note}，僅供粗略參照）`; }
                 if(bench&&bench.median){
                     const ratio=per.PER/bench.median;
                     if(ratio<0.85){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 低於同業中位數 ${bench.median.toFixed(1)}（約同業的 ${(ratio*100).toFixed(0)}%），評價相對便宜、具價值吸引力。${benchTxt}`);fundScore+=1;}
                     else if(ratio>1.15){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 高於同業中位數 ${bench.median.toFixed(1)}（約同業的 ${(ratio*100).toFixed(0)}%），評價相對偏貴，須注意合理性。${benchTxt}`);fundScore-=1;}
                     else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 與同業中位數 ${bench.median.toFixed(1)} 相當（約同業的 ${(ratio*100).toFixed(0)}%），估值尚稱合理。${benchTxt}`);}
                 }else{
-                    if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。`);fundScore+=1;}
-                    else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。`);fundScore-=1;}
-                    else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。`);}
+                    if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。${benchTxt}`);fundScore+=1;}
+                    else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。${benchTxt}`);fundScore-=1;}
+                    else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。${benchTxt}`);}
                 }
             }
             if(per&&per.dividend_yield&&per.dividend_yield>=4){tags.push(['高殖利率','tag-pos']);reasons.push(`【評價】殖利率約 ${per.dividend_yield}%，適合穩定現金流。`);fundScore+=1;}
