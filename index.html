@@ -137,8 +137,19 @@
             const end=fmtDate(new Date());
             const s=new Date(); s.setDate(s.getDate()-days); const start=fmtDate(s);
             const url=`${API}?dataset=${dataset}&data_id=${ticker}&start_date=${start}&end_date=${end}`;
-            const r=await fetch(url); const j=await r.json();
-            return (j.msg==='success'&&j.data)?j.data:null;
+            let lastErr=null;
+            for(let attempt=0; attempt<3; attempt++){
+                try{
+                    const ctrl=new AbortController();
+                    const t=setTimeout(()=>ctrl.abort(), 15000);
+                    const r=await fetch(url,{signal:ctrl.signal});
+                    clearTimeout(t);
+                    const j=await r.json();
+                    return (j.msg==='success'&&j.data)?j.data:null;
+                }catch(e){ lastErr=e; await new Promise(r=>setTimeout(r,400*(attempt+1))); }
+            }
+            if(lastErr) console.warn('getJSON failed after retries',dataset,ticker,lastErr.message);
+            return null;
         }
         function ma(c,n){ return c.length>=n?c.slice(-n).reduce((a,b)=>a+b,0)/n:null; }
         function rsi(c,n=14){
@@ -341,7 +352,7 @@
             try{
                 for(let i=0;i<peers.length;i+=8){
                     const batch=peers.slice(i,i+8);
-                    const pers=await Promise.all(batch.map(c=>getJSON('TaiwanStockPER',c,1)));
+                    const pers=await Promise.all(batch.map(c=>getJSON('TaiwanStockPER',c,30)));
                     pers.forEach(p=>{ const v=(p&&p.length)?p[p.length-1].PER:null; if(v&&v>0&&v<500) vals.push(v); });
                     if(i+8<peers.length) await new Promise(r=>setTimeout(r,250));
                 }
@@ -429,7 +440,7 @@
             let ratios=null, bench=null, volatility=null;
             const industryNow = info ? info.industry_category : '—';
             try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
-            bench=null; // 暫時註解 getIndustryBench 以隔離問題
+            try{ bench=await getIndustryBench(ticker); }catch(e){ bench=null; }
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
@@ -592,7 +603,7 @@
                 </div>
                 ${matchHtml}
                 <div class="disclaimer">【免責聲明】本網頁為「投資資訊分析」工具，所有內容（含技術指標、財務比率、問卷推薦）僅供教育與參考之用，<b>不構成任何證券買賣邀約、招攬或個別投資建議</b>。本工具未考量使用者個人財務狀況、投資目標與風險屬性之全貌，所生成之資訊不具個別化顧問性質。投資有風險，過去績效不代表未來表現；財務比率多基於公開財報（TTM 近四季加總）與 FinMind 公開 API 推算，可能存在時間落差、資料缺漏或估算誤差，同業基準因樣本有限僅供粗略參照。使用者應自行審慎評估，必要時諮詢合格證券投資顧問或財務顧問，並依自身風險承受度獨立決策，盈虧自負。</div>
-                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v12d · 最後更新 2026-07-11</div>
+                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v15 · 最後更新 2026-07-11</div>
             `;
             return html;
         }
