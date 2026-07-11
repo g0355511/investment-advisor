@@ -406,7 +406,7 @@
                 const gp=(rev&&cost!=null)?rev-cost:null;
                 if(gp!=null&&rev) r.grossMargin=gp/rev*100;
                 const opInc2=opInc; // 金融業外，營業利益用 opInc（FinMind=OperatingIncome / TWSE=營業利益）
-                if(opInc2!=null&&rev) r.opMargin=opInc2/rev*100;
+                if(opInc2!=null&&rev){ r.opMargin=opInc2/rev*100; console.log('[diag] opInc2=',opInc2,'rev=',rev,'opMargin=',r.opMargin); }
                 if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
             }
             if(netIncome!=null&&bs.totalAssets) r.roa=netIncome/bs.totalAssets*100;
