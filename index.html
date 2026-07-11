@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>投資建議系統</title>
+    <title>投資資訊分析系統</title>
     <style>
         * { box-sizing: border-box; }
         body { font-family: 'Microsoft JhengHei','PingFang TC',sans-serif; margin:0; padding:20px; background:linear-gradient(135deg,#f5f7fa,#e4edf5); min-height:100vh; }
@@ -82,8 +82,8 @@
 </head>
 <body>
     <div class="container">
-        <h1>📈 投資建議系統</h1>
-        <div class="subtitle">真實資料 · 技術指標 · 企業基本資料 · 投資人屬性問卷</div>
+        <h1>📈 投資資訊分析系統</h1>
+        <div class="subtitle">真實資料 · 技術指標 · 企業基本資料 · 投資人屬性問卷（僅供參考，非投資建議）</div>
 
         <div class="section">
             <div class="section-title">🔍 個股分析</div>
@@ -244,36 +244,37 @@
                 equity:get('Equity')
             };
         }
-        // 財務比率（結合損益表 + 資產負債表，支援金融業）
+        // 財務比率（結合損益表 + 資產負債表，支援金融業，TTM 口徑）
         async function getRatios(ticker, isFinance){
             const [bs, fin, perArr]=await Promise.all([getBalanceSheet(ticker,isFinance),getFin(ticker,isFinance),getJSON('TaiwanStockPER',ticker,30)]);
             if(!bs) return null;
             const per=(perArr&&perArr.length)?perArr[perArr.length-1]:null;
-            const rev=fin?fin.revenue:null;
-            const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
-            let cost=null, opIncome=null, preTax=null, netIncome=fin?fin.netIncome:null, netIntInc=null;
+            const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,400);
+            // TTM：取最近 4 季（依財報日期排序）加總
+            let revTTM=null, costTTM=null, netTTM=null, netIntTTM=null;
             if(finRows&&finRows.length){
-                const li=finRows[finRows.length-1].date;
-                const items=finRows.filter(r=>r.date===li);
-                const g=t=>{const x=items.find(r=>r.type===t);return x?x.value:null;};
-                cost=g('CostOfGoodsSold');
-                opIncome=g(isFinance?'NetInterestIncome':'OperatingIncome');
-                netIntInc=g('NetInterestIncome');
-                preTax=g('PreTaxIncome');
-                if(netIncome===null) netIncome=g(isFinance?'IncomeAfterTax':'IncomeAfterTaxes');
+                const dates=[...new Set(finRows.map(r=>r.date))].sort();
+                const last4=dates.slice(-4);
+                const inLast4=r=>last4.includes(r.date);
+                const sum=t=>finRows.filter(inLast4).reduce((a,r)=>a+(r.type===t&&r.value?r.value:0),0);
+                revTTM=sum('Revenue');
+                costTTM=sum('CostOfGoodsSold');
+                netTTM=sum(isFinance?'IncomeAfterTax':'IncomeAfterTaxes');
+                netIntTTM=sum('NetInterestIncome');
             }
+            const rev=revTTM, cost=costTTM, netIncome=netTTM;
             const N_A='金融業不適用';
-            const r={ date:bs.date, isFinance };
+            const r={ date:bs.date, isFinance, ttm:true };
             // 1. 流動性
             if(isFinance){
-                r.cashRatio=(bs.cash&&bs.totalLiab)?bs.cash/bs.totalLiab*100:null; // 現金佔總負債比
+                r.cashRatio=(bs.cash&&bs.totalLiab)?bs.cash/bs.totalLiab*100:null;
                 r.currentRatio=N_A; r.quickRatio=N_A;
             }else{
                 r.currentRatio=(bs.currentAssets&&bs.currentLiab)?bs.currentAssets/bs.currentLiab:null;
                 const quick=(bs.currentAssets&&bs.inventory!=null)?bs.currentAssets-bs.inventory:null;
                 r.quickRatio=(quick!=null&&bs.currentLiab)?quick/bs.currentLiab:null;
             }
-            // 2. 資產管理
+            // 2. 資產管理（TTM 流量 ÷ 期末存量）
             if(isFinance){
                 if(rev&&bs.totalAssets) r.taTurnover=rev/bs.totalAssets;
                 r.arTurnover=N_A; r.arDays=N_A; r.invTurnover=N_A; r.invDays=N_A; r.apTurnover=N_A; r.apDays=N_A; r.faTurnover=N_A;
@@ -289,16 +290,17 @@
             }
             // 3. 負債管理
             r.debtRatio=(bs.totalLiab&&bs.totalAssets)?bs.totalLiab/bs.totalAssets*100:null;
-            // 4. 獲利能力
+            // 4. 獲利能力（TTM）
             if(isFinance){
                 r.grossMargin=N_A; r.opMargin=N_A;
-                if(netIntInc!=null&&bs.totalAssets) r.nim=netIntInc/bs.totalAssets*100; // 淨利差 NIM
-                if(netIntInc!=null&&rev) r.netIntRatio=netIntInc/rev*100; // 利息淨收益率
+                if(netIntTTM!=null&&bs.totalAssets) r.nim=netIntTTM/bs.totalAssets*100;
+                if(netIntTTM!=null&&rev) r.netIntRatio=netIntTTM/rev*100;
                 if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
             }else{
                 const gp=(rev&&cost!=null)?rev-cost:null;
                 if(gp!=null&&rev) r.grossMargin=gp/rev*100;
-                if(opIncome!=null&&rev) r.opMargin=opIncome/rev*100;
+                const opInc=netIntTTM; // 金融業外，營業利益用損益表 OperatingIncome 較準；此處 rev-cost 近似營業成本，營業利益另取
+                if(opInc!=null&&rev) r.opMargin=opInc/rev*100;
                 if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
             }
             if(netIncome!=null&&bs.totalAssets) r.roa=netIncome/bs.totalAssets*100;
@@ -308,10 +310,10 @@
             r.pbr=(per&&per.PBR!=null)?per.PBR:null;
             // 6. 杜邦方程式
             if(isFinance){
-                // 金融業簡化：ROE = ROA × 權益乘數（無資產周轉概念）
-                if(r.roa!=null && bs.totalAssets && bs.equity){
+                // 金融業：ROE ≈ NIM × 資產周轉(生息資產運用) × 權益乘數；此處以 NIM×權益乘數近似核心驅動
+                if(r.nim!=null && bs.totalAssets && bs.equity){
                     const equityMult=bs.totalAssets/bs.equity;
-                    r.dupont={ roa:r.roa/100, equityMult, roe:r.roa/100*equityMult*100, finance:true };
+                    r.dupont={ nim:r.nim/100, equityMult, roe:r.nim/100*equityMult*100, finance:true };
                 }
             }else if(r.netMargin!=null && r.taTurnover && bs.totalAssets && bs.equity){
                 const equityMult=bs.totalAssets/bs.equity;
@@ -319,7 +321,21 @@
             }
             return r;
         }
-        function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry}){
+        // 同業基準：取資料庫同產業其他標的之 PER 中位數（樣本有限，僅供參考）
+        async function getIndustryBench(industry){
+            if(!industry || !STOCK_DB) return null;
+            const peers=STOCK_DB.filter(s=>s.industry===industry).map(s=>s.code);
+            if(peers.length<2) return null;
+            try{
+                const pers=await Promise.all(peers.map(c=>getJSON('TaiwanStockPER',c,1)));
+                const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0);
+                if(vals.length<2) return null;
+                vals.sort((a,b)=>a-b);
+                const mid=vals[Math.floor(vals.length/2)];
+                return { median:mid, n:vals.length };
+            }catch(e){ return null; }
+        }
+        function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry,bench,volatility}){
             const chg=((close-prevClose)/prevClose*100);
             const tags=[],reasons=[];
             const isFin = industry==='金融保險';
@@ -358,11 +374,19 @@
             }
             // 評價（本益比/殖利率）
             if(per&&per.PER){
-                if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。`);fundScore+=1;}
-                else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。`);fundScore-=1;}
-                else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。`);}
+                let benchTxt='';
+                if(bench&&bench.median){ benchTxt=`（同業中位數約 ${bench.median.toFixed(1)}，樣本 ${bench.n} 檔）`; }
+                if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。${benchTxt}`);fundScore+=1;}
+                else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。${benchTxt}`);fundScore-=1;}
+                else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。${benchTxt}`);}
             }
             if(per&&per.dividend_yield&&per.dividend_yield>=4){tags.push(['高殖利率','tag-pos']);reasons.push(`【評價】殖利率約 ${per.dividend_yield}%，適合穩定現金流。`);fundScore+=1;}
+            // 風險指標：年化波動率
+            if(volatility!=null){
+                if(volatility>=40){tags.push(['波動偏高','tag-warn']);reasons.push(`【風險】近一年年化波動率約 ${volatility.toFixed(1)}%，價格震盪大，須控管部位與停損。`);}
+                else if(volatility<=20){tags.push(['波動平穩','tag-neu']);reasons.push(`【風險】近一年年化波動率約 ${volatility.toFixed(1)}%，走勢相對平穩。`);}
+                else{tags.push(['波動适中','tag-neu']);reasons.push(`【風險】近一年年化波動率約 ${volatility.toFixed(1)}%，屬一般水準。`);}
+            }
             // 綜合結論
             let verdict;
             if(techScore>0 && fundScore>0) verdict='技術面與基本面相互印證，均偏多頭，可列入觀察名單並分批佈局。';
@@ -377,15 +401,26 @@
             const per = (perArr&&perArr.length)?perArr[perArr.length-1]:null;
             const isFinance = info && info.industry_category==='金融保險';
             const fin=await getFin(ticker,isFinance);
-            // 財務比率（資產負債表+損益表，獨立抓取不阻塞主流程）
-            let ratios=null;
+            // 財務比率 + 同業基準（獨立抓取不阻塞主流程）
+            let ratios=null, bench=null, volatility=null;
             try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
+            try{ bench=await getIndustryBench(industry); }catch(e){ bench=null; }
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
             const ma20=ma(closes,20),ma60=ma(closes,60),rsiVal=rsi(closes);
+            // 年化波動率（日報酬標準差 × √252）
+            try{
+                const rets=[];
+                for(let i=1;i<closes.length;i++){ const a=closes[i-1],b=closes[i]; if(a>0) rets.push(Math.log(b/a)); }
+                if(rets.length>20){
+                    const mean=rets.reduce((a,b)=>a+b,0)/rets.length;
+                    const varc=rets.reduce((a,b)=>a+(b-mean)*(b-mean),0)/(rets.length-1);
+                    volatility=Math.sqrt(varc)*Math.sqrt(252)*100;
+                }
+            }catch(e){ volatility=null; }
             const close=last.close,prevClose=prev.close;
-            const {tags,summary,chg}=buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry:isFinance?'金融保險':'—'});
+            const {tags,summary,chg}=buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry:isFinance?'金融保險':'—',bench,volatility});
             const cc=chg>0?'up':(chg<0?'down':'flat'); const sign=chg>0?'+':'';
             const name=info?info.stock_name:ticker;
             const industry=info?info.industry_category:'—';
@@ -405,7 +440,7 @@
             const ratioHtml = ratios ? (()=>{
                 const R=ratios;
                 const N_A='金融業不適用';
-                const asof = `資料時間點：${R.date} 財報`;
+                const asof = `資料時間點：${R.date} 財報（TTM 近四季加總）`;
                 const f2=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2));
                 const f1=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(1));
                 const pct=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2)+'%');
@@ -415,7 +450,7 @@
                 let dupont='';
                 if(R.dupont){
                     if(R.dupont.finance){
-                        dupont=`<div class="dupont">杜邦分解（金融業簡化）：ROE = 總資產報酬率 ROA(${(R.dupont.roa*100).toFixed(2)}%) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b></div>`;
+                        dupont=`<div class="dupont">杜邦分解（金融業）：ROE ≈ 淨利差 NIM(${(R.dupont.nim*100).toFixed(2)}%) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b>（核心為利差槓桿放大）</div>`;
                     }else{
                         dupont=`<div class="dupont">杜邦分解：ROE = 純益率(${(R.dupont.netMargin*100).toFixed(2)}%) × 總資產周轉率(${R.dupont.taTurnover.toFixed(2)}) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b></div>`;
                     }
@@ -531,7 +566,7 @@
                     <div>${summary}投資人可結合自身風險屬性與投資期限決定配置比重，建議分批進場以分散時點風險。</div>
                 </div>
                 ${matchHtml}
-                <div class="disclaimer">本網頁內容僅供參考，非買賣邀約或投資建議。投資有風險，過去績效不代表未來表現，請依自身風險承受度審慎評估，必要時諮詢合格證券投顧或財務顧問。股價即時盤來源為證交所公開資料（經 Cloudflare Worker 代理），日線與基本面來源為 FinMind 公開 API，可能有延遲或誤差。</div>
+                <div class="disclaimer">【免責聲明】本網頁為「投資資訊分析」工具，所有內容（含技術指標、財務比率、問卷推薦）僅供教育與參考之用，<b>不構成任何證券買賣邀約、招攬或個別投資建議</b>。本工具未考量使用者個人財務狀況、投資目標與風險屬性之全貌，所生成之資訊不具個別化顧問性質。投資有風險，過去績效不代表未來表現；財務比率多基於公開財報（TTM 近四季加總）與 FinMind 公開 API 推算，可能存在時間落差、資料缺漏或估算誤差，同業基準因樣本有限僅供粗略參照。使用者應自行審慎評估，必要時諮詢合格證券投資顧問或財務顧問，並依自身風險承受度獨立決策，盈虧自負。</div>
             `;
             return html;
         }
