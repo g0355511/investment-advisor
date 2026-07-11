@@ -151,6 +151,14 @@
             if(lastErr) console.warn('getJSON failed after retries',dataset,ticker,lastErr.message);
             return null;
         }
+        // 解析數字：處理千分位逗號、民國年 "--"/"—"/缺值 → null
+        function parseNum(s){
+            if(s===null||s===undefined) return null;
+            const t=String(s).trim();
+            if(t===''||t==='--'||t==='—'||t==='-') return null;
+            const n=parseFloat(t.replace(/,/g,''));
+            return isNaN(n)?null:n;
+        }
         function ma(c,n){ return c.length>=n?c.slice(-n).reduce((a,b)=>a+b,0)/n:null; }
         function rsi(c,n=14){
             if(c.length<n+1) return null;
@@ -340,26 +348,124 @@
             catch(e){ INDUSTRY_MAP={}; }
             return INDUSTRY_MAP;
         }
+        // ===== TWSE 官方 OpenAPI 兜底 =====
+        // 日線：STOCK_DAY（近 6 個月拼接）。CORS 開放，瀏覽器可直接 fetch。
+        const TWSE_STOCK_DAY=(code,ymd)=>`https://www.twse.com.tw/exchangeReport/STOCK_DAY?response=json&date=${ymd}&stockNo=${code}`;
+        async function fetchTWSEMonth(code, ymd){
+            const url=TWSE_STOCK_DAY(code,ymd);
+            const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),15000);
+            try{
+                const r=await fetch(url,{signal:ctrl.signal});
+                clearTimeout(t);
+                const j=await r.json();
+                if(!j||j.stat!=='OK'||!Array.isArray(j.data)) return [];
+                const out=[];
+                const yearOffset=0; // 民國年 = 西元-1911
+                for(const row of j.data){
+                    if(!row||row.length<7) continue;
+                    // row: [日期(115/07/01), 成交股數, 成交金額, 開盤, 最高, 最低, 收盤, 漲跌, 筆數, 註記]
+                    const [rocDate,vol,amt,open,high,low,close]=row;
+                    if(!rocDate) continue;
+                    const parts=String(rocDate).split('/');
+                    if(parts.length<3) continue;
+                    const yy=parseInt(parts[0],10)+1911;
+                    const mm=parts[1], dd=parts[2];
+                    const date=`${yy}-${mm}-${dd}`;
+                    const c=parseNum(close);
+                    out.push({ date, open:parseNum(open), high:parseNum(high), low:parseNum(low), close:c, volume:parseNum(vol) });
+                }
+                return out;
+            }catch(e){ clearTimeout(t); console.warn('TWSE STOCK_DAY month failed',code,ymd,e.message); return []; }
+        }
+        async function getPriceTWSE(code){
+            // 抓最近 6 個月（每月用該月任一日作 date 參數）拼接，取最近 120 筆交易
+            const now=new Date();
+            const months=[];
+            for(let i=0;i<6;i++){
+                const d=new Date(now.getFullYear(), now.getMonth()-i, 1);
+                const ymd=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}01`;
+                months.push(ymd);
+            }
+            let rows=[];
+            for(const ymd of months){
+                const part=await fetchTWSEMonth(code,ymd);
+                if(part.length) rows=rows.concat(part);
+                if(rows.length>=120) break;
+            }
+            if(!rows.length) return null;
+            // 按日期升冣排序，去重
+            const seen=new Set(); const uniq=[];
+            rows.sort((a,b)=>a.date<b.date?-1:1).forEach(r=>{ if(!seen.has(r.date)){ seen.add(r.date); uniq.push(r); } });
+            const tail=uniq.slice(-120);
+            // 對映成 FinMind 風格 {date, close, open, high, low, volume}，缺收盤的濾除
+            const mapped=tail.filter(r=>r.close!=null).map(r=>({ date:r.date, close:r.close, open:r.open, high:r.high, low:r.low, volume:r.volume }));
+            return mapped.length?mapped:null;
+        }
+        // 全市場本益比/殖利率/淨值比（BWIBBU_ALL），每天更新一次即可快取
+        const TWSE_BWIBBU='https://www.twse.com.tw/exchangeReport/BWIBBU_ALL?response=json';
+        let BWI_CACHE=null;
+        async function loadBWI(){
+            if(BWI_CACHE) return BWI_CACHE;
+            try{
+                const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),15000);
+                const r=await fetch(TWSE_BWIBBU,{signal:ctrl.signal});
+                clearTimeout(t);
+                const j=await r.json();
+                if(!j||j.stat!=='OK'||!Array.isArray(j.data)) return null;
+                const map={};
+                for(const row of j.data){
+                    if(!row||row.length<5) continue;
+                    const [code,name,pe,dy,pb]=row;
+                    const PER=parseNum(pe);
+                    map[String(code)]={
+                        code:String(code), name:name,
+                        PER:PER,
+                        dividend_yield:parseNum(dy),
+                        PBR:parseNum(pb)
+                    };
+                }
+                BWI_CACHE=map;
+                return map;
+            }catch(e){ console.warn('BWIBBU_ALL failed',e.message); return null; }
+        }
         async function getIndustryBench(ticker){
             const map=await loadIndustryMap();
             if(!map || !map[ticker]) return null;
             const industry=map[ticker];
-            let peers=Object.entries(map).filter(([c,ind])=>ind===industry && c!==ticker).map(([c])=>c);
-            if(peers.length<3) return { median:null, n:peers.length, industry, note:'同業樣本過少' };
-            // 隨機取最多 24 檔，分批抓（每批 8、間隔 250ms）避限流
-            if(peers.length>24) peers=peers.sort(()=>Math.random()-0.5).slice(0,24);
-            const vals=[];
+            // 同業代號（含自身，稍後過濾）
+            const peers=Object.entries(map).filter(([c,ind])=>ind===industry && c!==ticker).map(([c])=>c);
+            const totalPeers=peers.length;
+            if(totalPeers<1) return { median:null, n:0, industry, totalPeers:0, note:'同業樣本過少' };
+            // 主路：BWIBBU_ALL 一次含全市場 PER
             try{
-                for(let i=0;i<peers.length;i+=8){
-                    const batch=peers.slice(i,i+8);
+                const bwi=await loadBWI();
+                if(bwi){
+                    const vals=[];
+                    for(const c of peers){ const b=bwi[c]; if(b&&b.PER&&b.PER>0&&b.PER<500) vals.push(b.PER); }
+                    if(vals.length>=3){
+                        vals.sort((a,b)=>a-b);
+                        const mid=vals[Math.floor(vals.length/2)];
+                        return { median:mid, n:vals.length, industry, totalPeers };
+                    }
+                    // 有效樣本不足，標記但繼續嘗試備援
+                    if(vals.length>=1) return { median:vals.sort((a,b)=>a-b)[Math.floor(vals.length/2)], n:vals.length, industry, totalPeers, note:'有效樣本過少' };
+                }
+            }catch(e){ console.warn('BWIBBU bench failed, fallback to FinMind',e.message); }
+            // 備援：FinMind 分批抓 PER（原有邏輯）
+            try{
+                let sample=peers;
+                if(sample.length>24) sample=sample.sort(()=>Math.random()-0.5).slice(0,24);
+                const vals=[];
+                for(let i=0;i<sample.length;i+=8){
+                    const batch=sample.slice(i,i+8);
                     const pers=await Promise.all(batch.map(c=>getJSON('TaiwanStockPER',c,30)));
                     pers.forEach(p=>{ const v=(p&&p.length)?p[p.length-1].PER:null; if(v&&v>0&&v<500) vals.push(v); });
-                    if(i+8<peers.length) await new Promise(r=>setTimeout(r,250));
+                    if(i+8<sample.length) await new Promise(r=>setTimeout(r,250));
                 }
-                if(vals.length<3) return { median:null, n:vals.length, industry, note:'有效樣本過少' };
+                if(vals.length<3) return { median:null, n:vals.length, industry, totalPeers, note:'有效樣本過少' };
                 vals.sort((a,b)=>a-b);
                 const mid=vals[Math.floor(vals.length/2)];
-                return { median:mid, n:vals.length, industry, totalPeers:peers.length };
+                return { median:mid, n:vals.length, industry, totalPeers, src:'finmind' };
             }catch(e){ return null; }
         }
         function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry,bench,volatility}){
@@ -432,18 +538,56 @@
             return {tags,summary:reasons.join(''),chg};
         }
         async function render(ticker){
-            const [rows,perArr,info]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,30),getInfo(ticker)]);
-            const per = (perArr&&perArr.length)?perArr[perArr.length-1]:null;
+            // 主源：FinMind 日線 + 全市場 PER（BWIBBU 兜底）；公司資料走 TaiwanStockInfo（不同源）
+            const [rows,perArr,info,bwi]=await Promise.all([
+                getJSON('TaiwanStockPrice',ticker,120),
+                getJSON('TaiwanStockPER',ticker,30),
+                getInfo(ticker),
+                loadBWI()   // TWSE 全市場本益比快取（CORS 開放）
+            ]);
             const isFinance = info && info.industry_category==='金融保險';
+            // PER 主源 FinMind，失敗則用 BWIBBU 當日全市場值兜底
+            let per = (perArr&&perArr.length)?perArr[perArr.length-1]:null;
+            if((!per||per.PER==null) && bwi && bwi[ticker]){
+                const b=bwi[ticker];
+                per = { PER:b.PER, dividend_yield:b.dividend_yield, PBR:b.PBR };
+            }
+            // 日線兜底：FinMind 失敗/回空 → TWSE STOCK_DAY（近 6 個月拼接）
+            let rowsSrc='FinMind';
+            let finalRows=rows;
+            if(!finalRows||!finalRows.length){
+                try{
+                    const tw=await getPriceTWSE(ticker);
+                    if(tw&&tw.length){ finalRows=tw; rowsSrc='TWSE'; }
+                }catch(e){ console.warn('TWSE fallback failed',e.message); }
+            }
             const fin=await getFin(ticker,isFinance);
             // 財務比率 + 同業基準（獨立抓取不阻塞主流程）
             let ratios=null, bench=null, volatility=null;
             const industryNow = info ? info.industry_category : '—';
             try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
             try{ bench=await getIndustryBench(ticker); }catch(e){ bench=null; }
-            if(!rows||!rows.length) throw new Error('no_data');
-            const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
-            const closes=rows.map(r=>r.close);
+            if(!finalRows||!finalRows.length){
+                // graceful 降級：日線（FinMind + TWSE）皆失敗，但公司資料與即時盤通常可用
+                const name=info?info.stock_name:ticker;
+                const industry=info?info.industry_category:'—';
+                const partial=`
+                    <div class="stock-header">
+                        <span class="stock-name">${name}</span>
+                        <span class="stock-code">${ticker}</span>
+                        <span class="stock-industry">${industry}</span>
+                    </div>
+                    <div class="info-box">公司名稱：${name}（${ticker}）<br>所屬產業：${industry}</div>
+                    <div class="advice" style="background:linear-gradient(135deg,#fff8f0,#fef5e7);border-left:4px solid #e67e22;">
+                        <div class="advice-title">⚠️ 資料源暫時無法連線</div>
+                        <div>日線行情（FinMind 與證交所 TWSE 兜底）目前皆無法取得，可能為 API 額度限制或網路暫時中斷。本頁僅提供公司基本資料與盤中即時價（見下方即時報價）；技術指標、財務比率與同業基準暫不顯示。請稍後再試，或於非高峰時段重新查詢。</div>
+                    </div>
+                    <div class="disclaimer">【免責聲明】…</div>
+                    <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v16 · 最後更新 2026-07-11</div>`;
+                return partial;
+            }
+            const last=finalRows[finalRows.length-1], prev=finalRows.length>1?finalRows[finalRows.length-2]:last;
+            const closes=finalRows.map(r=>r.close);
             const ma20=ma(closes,20),ma60=ma(closes,60),rsiVal=rsi(closes);
             // 年化波動率（日報酬標準差 × √252）
             try{
@@ -579,7 +723,7 @@
                     <span class="stock-name">${name}</span>
                     <span class="stock-code">${ticker}</span>
                     <span class="stock-industry">${industry}</span>
-                    <span class="stock-date">日線資料 ${last.date}</span>
+                    <span class="stock-date">日線資料 ${last.date}（來源：${rowsSrc==='TWSE'?'證交所 TWSE 兜底':'FinMind'}）</span>
                 </div>
                 <div class="stock-price" id="realtimeBox">
                     <span class="price-num" id="rtPrice">${close.toLocaleString()}</span>
@@ -603,7 +747,7 @@
                 </div>
                 ${matchHtml}
                 <div class="disclaimer">【免責聲明】本網頁為「投資資訊分析」工具，所有內容（含技術指標、財務比率、問卷推薦）僅供教育與參考之用，<b>不構成任何證券買賣邀約、招攬或個別投資建議</b>。本工具未考量使用者個人財務狀況、投資目標與風險屬性之全貌，所生成之資訊不具個別化顧問性質。投資有風險，過去績效不代表未來表現；財務比率多基於公開財報（TTM 近四季加總）與 FinMind 公開 API 推算，可能存在時間落差、資料缺漏或估算誤差，同業基準因樣本有限僅供粗略參照。使用者應自行審慎評估，必要時諮詢合格證券投資顧問或財務顧問，並依自身風險承受度獨立決策，盈虧自負。</div>
-                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v15 · 最後更新 2026-07-11</div>
+                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v16 · 最後更新 2026-07-11</div>
             `;
             return html;
         }
@@ -621,7 +765,7 @@
             elPrice.textContent=rt.price.toLocaleString();
             elChg.className='price-change '+cc;
             elChg.textContent=`${sign}${chgPct.toFixed(2)}%（即時）`;
-            elTime.textContent='盤中 '+rt.time;
+            elTime.textContent='即時（最後成交 '+rt.time+'）';
         }
         function show(html,isErr){ const b=document.getElementById('result'); b.innerHTML=isErr?`<div class="error-box">${html}</div>`:html; }
         // 依使用者問卷答案，重建「期望標籤集合」（與 stockdb.recommend 邏輯一致）
