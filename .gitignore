@@ -1,0 +1,22 @@
+# 依賴目錄（wrangler 安裝產生，不需上傳）
+node_modules/
+
+# 作業系統 / 編輯器暫存
+.DS_Store
+Thumbs.db
+*.swp
+*~
+
+# 本機測試暫存
+*.json
+!wrangler.toml
+fm_*.json
+yf_*.json
+ao.json
+cp.json
+ct.json
+tp.json
+twse_rt.json
+
+# 登入憑證快取
+.wrangler/
