@@ -168,6 +168,19 @@
             if(Math.abs(v)>=1e4) return (v/1e4).toFixed(2)+' 萬';
             return v.toLocaleString();
         }
+        // 本益比特殊顯示邏輯：
+        //  - null/undefined → 缺資料
+        //  - 0 且 EPS<=0(虧損) → 因虧損，不適用
+        //  - 0 但 EPS>0 → 資料異常（有獲利卻本益比為0）
+        //  - 正常數值 → 顯示數值
+        function perDisplay(per, eps){
+            if(per===null||per===undefined) return '—';
+            if(per===0){
+                if(eps!==null && eps!==undefined && eps<=0) return '因虧損，不適用';
+                return '資料異常（有獲利但本益比為 0）';
+            }
+            return per;
+        }
         function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal}){
             const chg=((close-prevClose)/prevClose*100);
             const tags=[],reasons=[];
@@ -227,7 +240,7 @@
                 </div>
                 ${finHtml}
                 <div class="metrics">
-                    <div class="metric"><div class="metric-label">本益比</div><div class="metric-value">${per&&per.PER!==null&&per.PER!==undefined?per.PER:'—'}</div></div>
+                    <div class="metric"><div class="metric-label">本益比</div><div class="metric-value">${perDisplay(per?per.PER:null, fin?fin.eps:null)}</div></div>
                     <div class="metric"><div class="metric-label">殖利率</div><div class="metric-value">${per&&per.dividend_yield!==null&&per.dividend_yield!==undefined?per.dividend_yield+'%':'—'}</div></div>
                     <div class="metric"><div class="metric-label">股價淨值比</div><div class="metric-value">${per&&per.PBR!==null&&per.PBR!==undefined?per.PBR:'—'}</div></div>
                     <div class="metric"><div class="metric-label">MA20</div><div class="metric-value">${ma20?ma20.toFixed(1):'—'}</div></div>
