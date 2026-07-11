@@ -166,13 +166,27 @@
             if(j.msg==='success'&&j.data&&j.data.length){ return j.data[j.data.length-1]; }
             return null;
         }
-        async function getFin(ticker){
+        async function getFin(ticker, isFinance){
             const rows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
             if(!rows) return null;
             const latest=rows[rows.length-1].date;
             const items=rows.filter(r=>r.date===latest);
             const get=t=>{ const x=items.find(r=>r.type===t); return x?x.value:null; };
-            return { date:latest, eps:get('EPS'), revenue:get('Revenue'), grossProfit:get('GrossProfit'), netIncome:get('IncomeAfterTaxes') };
+            const revenue=get('Revenue');
+            const netIncome=get(isFinance?'IncomeAfterTax':'IncomeAfterTaxes');
+            let eps=get('EPS');
+            if((eps===null||eps===undefined) && isFinance && netIncome!==null){
+                // 金融業用普通股股本(面額10元)推算股數
+                const shareRows=await getJSON('TaiwanStockBalanceSheet',ticker,200);
+                if(shareRows&&shareRows.length){
+                    const sli=shareRows[shareRows.length-1].date;
+                    const sitems=shareRows.filter(r=>r.date===sli);
+                    const sg=t=>{const x=sitems.find(r=>r.type===t);return x?x.value:null;};
+                    const ordinary=sg('OrdinaryShare');
+                    if(ordinary) eps=netIncome/(ordinary/10);
+                }
+            }
+            return { date:latest, eps, revenue, grossProfit:get('GrossProfit'), netIncome, isFinance };
         }
         function fmtNum(v){
             if(v===null||v===undefined) return '—';
@@ -193,15 +207,25 @@
             }
             return per;
         }
-        // 資產負債表
-        async function getBalanceSheet(ticker){
+        // 資產負債表（支援金融業）
+        async function getBalanceSheet(ticker, isFinance){
             const rows=await getJSON('TaiwanStockBalanceSheet',ticker,200);
             if(!rows||!rows.length) return null;
             const latest=rows[rows.length-1].date;
             const items=rows.filter(r=>r.date===latest);
             const get=t=>{ const x=items.find(r=>r.type===t); return x?x.value:null; };
+            if(isFinance){
+                return {
+                    date:latest, isFinance:true,
+                    cash:get('CashAndCashEquivalents'),
+                    currentLiab:get('CurrentContractLiabilities'),  // 金融業以保險契約/短期負債近似
+                    totalAssets:get('TotalAssets'),
+                    totalLiab:get('Liabilities'),
+                    equity:get('Equity')
+                };
+            }
             return {
-                date:latest,
+                date:latest, isFinance:false,
                 currentAssets:get('CurrentAssets'),
                 currentLiab:get('CurrentLiabilities'),
                 inventory:get('Inventories'),
@@ -213,54 +237,73 @@
                 equity:get('Equity')
             };
         }
-        // 財務比率（結合損益表 + 資產負債表）
-        async function getRatios(ticker){
-            const [bs, fin, perArr]=await Promise.all([getBalanceSheet(ticker),getFin(ticker),getJSON('TaiwanStockPER',ticker,30)]);
+        // 財務比率（結合損益表 + 資產負債表，支援金融業）
+        async function getRatios(ticker, isFinance){
+            const [bs, fin, perArr]=await Promise.all([getBalanceSheet(ticker,isFinance),getFin(ticker,isFinance),getJSON('TaiwanStockPER',ticker,30)]);
             if(!bs) return null;
             const per=(perArr&&perArr.length)?perArr[perArr.length-1]:null;
             const rev=fin?fin.revenue:null;
-            const cogs=fin?fin.grossProfit:null; // 用毛利率反推? 這裡改用 Revenue-CostOfGoodsSold
-            // 損益表細項需另取
             const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
-            let cost=rev, opIncome=null, preTax=null, netIncome=null;
+            let cost=null, opIncome=null, preTax=null, netIncome=fin?fin.netIncome:null;
             if(finRows&&finRows.length){
                 const li=finRows[finRows.length-1].date;
                 const items=finRows.filter(r=>r.date===li);
                 const g=t=>{const x=items.find(r=>r.type===t);return x?x.value:null;};
                 cost=g('CostOfGoodsSold');
-                opIncome=g('OperatingIncome');
+                opIncome=g(isFinance?'NetInterestIncome':'OperatingIncome');
                 preTax=g('PreTaxIncome');
-                netIncome=g('IncomeAfterTaxes');
+                if(netIncome===null) netIncome=g(isFinance?'IncomeAfterTax':'IncomeAfterTaxes');
             }
-            const gp=(rev&&cost!=null)?rev-cost:null;
-            const r={ date:bs.date };
+            const N_A='金融業不適用';
+            const r={ date:bs.date, isFinance };
             // 1. 流動性
-            r.currentRatio=(bs.currentAssets&&bs.currentLiab)?bs.currentAssets/bs.currentLiab:null;
-            // 速動比率 = (流動資產-存貨)/流動負債
-            const quick=(bs.currentAssets&&bs.inventory!=null)?bs.currentAssets-bs.inventory:null;
-            r.quickRatio=(quick!=null&&bs.currentLiab)?quick/bs.currentLiab:null;
-            // 2. 資產管理 (週轉率以「期末餘額」估算，天數=365/週轉率)
-            if(rev&&bs.ar) r.arTurnover=rev/bs.ar;
-            if(r.arTurnover) r.arDays=365/r.arTurnover;
-            if(cost!=null&&bs.inventory) r.invTurnover=cost/bs.inventory;
-            if(r.invTurnover) r.invDays=365/r.invTurnover;
-            if(rev&&bs.ap) r.apTurnover=rev/bs.ap;
-            if(r.apTurnover) r.apDays=365/r.apTurnover;
-            if(rev&&bs.fixedAssets) r.faTurnover=rev/bs.fixedAssets;
-            if(rev&&bs.totalAssets) r.taTurnover=rev/bs.totalAssets;
+            if(isFinance){
+                r.cashRatio=(bs.cash&&bs.totalLiab)?bs.cash/bs.totalLiab*100:null; // 現金佔總負債比
+                r.currentRatio=N_A; r.quickRatio=N_A;
+            }else{
+                r.currentRatio=(bs.currentAssets&&bs.currentLiab)?bs.currentAssets/bs.currentLiab:null;
+                const quick=(bs.currentAssets&&bs.inventory!=null)?bs.currentAssets-bs.inventory:null;
+                r.quickRatio=(quick!=null&&bs.currentLiab)?quick/bs.currentLiab:null;
+            }
+            // 2. 資產管理
+            if(isFinance){
+                if(rev&&bs.totalAssets) r.taTurnover=rev/bs.totalAssets;
+                r.arTurnover=N_A; r.arDays=N_A; r.invTurnover=N_A; r.invDays=N_A; r.apTurnover=N_A; r.apDays=N_A; r.faTurnover=N_A;
+            }else{
+                if(rev&&bs.ar) r.arTurnover=rev/bs.ar;
+                if(r.arTurnover) r.arDays=365/r.arTurnover;
+                if(cost!=null&&bs.inventory) r.invTurnover=cost/bs.inventory;
+                if(r.invTurnover) r.invDays=365/r.invTurnover;
+                if(rev&&bs.ap) r.apTurnover=rev/bs.ap;
+                if(r.apTurnover) r.apDays=365/r.apTurnover;
+                if(rev&&bs.fixedAssets) r.faTurnover=rev/bs.fixedAssets;
+                if(rev&&bs.totalAssets) r.taTurnover=rev/bs.totalAssets;
+            }
             // 3. 負債管理
             r.debtRatio=(bs.totalLiab&&bs.totalAssets)?bs.totalLiab/bs.totalAssets*100:null;
             // 4. 獲利能力
-            if(gp!=null&&rev) r.grossMargin=gp/rev*100;
-            if(opIncome!=null&&rev) r.opMargin=opIncome/rev*100;
-            if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
+            if(isFinance){
+                r.grossMargin=N_A; r.opMargin=N_A;
+                if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
+            }else{
+                const gp=(rev&&cost!=null)?rev-cost:null;
+                if(gp!=null&&rev) r.grossMargin=gp/rev*100;
+                if(opIncome!=null&&rev) r.opMargin=opIncome/rev*100;
+                if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
+            }
             if(netIncome!=null&&bs.totalAssets) r.roa=netIncome/bs.totalAssets*100;
             if(netIncome!=null&&bs.equity) r.roe=netIncome/bs.equity*100;
             // 5. 本益比 / 市價淨值比
             r.per=(per&&per.PER!=null&&per.PER!==0)?per.PER:null;
             r.pbr=(per&&per.PBR!=null)?per.PBR:null;
-            // 6. 杜邦方程式: ROE = 純益率 × 總資產周轉率 × 權益乘數
-            if(r.netMargin!=null && r.taTurnover && bs.totalAssets && bs.equity){
+            // 6. 杜邦方程式
+            if(isFinance){
+                // 金融業簡化：ROE = ROA × 權益乘數（無資產周轉概念）
+                if(r.roa!=null && bs.totalAssets && bs.equity){
+                    const equityMult=bs.totalAssets/bs.equity;
+                    r.dupont={ roa:r.roa/100, equityMult, roe:r.roa/100*equityMult*100, finance:true };
+                }
+            }else if(r.netMargin!=null && r.taTurnover && bs.totalAssets && bs.equity){
                 const equityMult=bs.totalAssets/bs.equity;
                 r.dupont={ netMargin:r.netMargin/100, taTurnover:r.taTurnover, equityMult, roe:r.netMargin/100*r.taTurnover*equityMult*100 };
             }
@@ -288,11 +331,13 @@
             return {tags,summary:reasons.join('')||'依目前技術與基本面資料綜合判斷。',chg};
         }
         async function render(ticker){
-            const [rows,perArr,info,fin]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,30),getInfo(ticker),getFin(ticker)]);
+            const [rows,perArr,info]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,30),getInfo(ticker)]);
             const per = (perArr&&perArr.length)?perArr[perArr.length-1]:null;
+            const isFinance = info && info.industry_category==='金融保險';
+            const fin=await getFin(ticker,isFinance);
             // 財務比率（資產負債表+損益表，獨立抓取不阻塞主流程）
             let ratios=null;
-            try{ ratios=await getRatios(ticker); }catch(e){ ratios=null; }
+            try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
@@ -311,28 +356,42 @@
                     最新財報季：${fin.date}<br>
                     每股盈餘 (EPS)：${fin.eps!==null?fin.eps:'—'}<br>
                     營收：${fmtNum(fin.revenue)}<br>
-                    毛利：${fmtNum(fin.grossProfit)}<br>
+                    ${fin.isFinance?'':`毛利：${fmtNum(fin.grossProfit)}<br>`}
                     稅後淨利：${fmtNum(fin.netIncome)}
                 </div>` : `<div class="info-box">公司名稱：${name}（${ticker}）<br>所屬產業：${industry}</div>`;
             // 財務比率區塊
             const ratioHtml = ratios ? (()=>{
                 const R=ratios;
-                const f2=v=>v===null||v===undefined?'—':v.toFixed(2);
-                const f1=v=>v===null||v===undefined?'—':v.toFixed(1);
-                const pct=v=>v===null||v===undefined?'—':v.toFixed(2)+'%';
+                const N_A='金融業不適用';
+                const f2=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2));
+                const f1=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(1));
+                const pct=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2)+'%');
                 const sec=(title,items)=>`<div class="ratio-sec"><div class="ratio-sec-title">${title}</div><div class="ratio-grid">${items.map(([l,v])=>`<div class="ratio-item"><span class="rl">${l}</span><span class="rv">${v}</span></div>`).join('')}</div></div>`;
                 let dupont='';
                 if(R.dupont){
-                    dupont=`<div class="dupont">杜邦分解：ROE = 純益率(${(R.dupont.netMargin*100).toFixed(2)}%) × 總資產周轉率(${R.dupont.taTurnover.toFixed(2)}) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b></div>`;
+                    if(R.dupont.finance){
+                        dupont=`<div class="dupont">杜邦分解（金融業簡化）：ROE = 總資產報酬率 ROA(${(R.dupont.roa*100).toFixed(2)}%) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b></div>`;
+                    }else{
+                        dupont=`<div class="dupont">杜邦分解：ROE = 純益率(${(R.dupont.netMargin*100).toFixed(2)}%) × 總資產周轉率(${R.dupont.taTurnover.toFixed(2)}) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b></div>`;
+                    }
                 }
+                const liquidity = R.isFinance
+                    ? sec('1. 流動性比率',[['現金佔總負債比',pct(R.cashRatio)],['流動比率',N_A],['速動比率',N_A]])
+                    : sec('1. 流動性比率',[['流動比率',f2(R.currentRatio)],['速動比率',f2(R.quickRatio)],['現金流量比','—']]);
+                const assetMgmt = R.isFinance
+                    ? sec('2. 資產管理能力比率',[['資產周轉率(營收/總資產)',f2(R.taTurnover)+' 次'],['應收帳款週轉率',N_A],['應收帳款天數',N_A],['存貨週轉率',N_A],['存貨出售天數',N_A],['應付帳款周轉率',N_A],['應付帳款天數',N_A],['固定資產周轉率',N_A]])
+                    : sec('2. 資產管理能力比率',[['應收帳款週轉率',f2(R.arTurnover)+' 次'],['應收帳款天數',f1(R.arDays)+' 天'],['存貨週轉率',f2(R.invTurnover)+' 次'],['存貨出售天數',f1(R.invDays)+' 天'],['應付帳款周轉率',f2(R.apTurnover)+' 次'],['應付帳款天數',f1(R.apDays)+' 天'],['固定資產周轉率',f2(R.faTurnover)+' 次'],['總資產周轉率',f2(R.taTurnover)+' 次']]);
+                const profit = R.isFinance
+                    ? sec('4. 獲利能力比率',[['毛利率',N_A],['營運利益率(利息淨收益率)',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]])
+                    : sec('4. 獲利能力比率',[['毛利率',pct(R.grossMargin)],['營運利益率',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]]);
                 return `
                 <div class="info-box">
-                    <strong>📊 財務比率分析</strong>（資料季別 ${R.date}，週轉率以期末餘額估算）<br>
-                    ${sec('1. 流動性比率',[['流動比率',f2(R.currentRatio)],['速動比率',f2(R.quickRatio)],['現金流量比','—']])}
-                    ${sec('2. 資產管理能力比率',[['應收帳款週轉率',f2(R.arTurnover)+' 次'],['應收帳款天數',f1(R.arDays)+' 天'],['存貨週轉率',f2(R.invTurnover)+' 次'],['存貨出售天數',f1(R.invDays)+' 天'],['應付帳款周轉率',f2(R.apTurnover)+' 次'],['應付帳款天數',f1(R.apDays)+' 天'],['固定資產周轉率',f2(R.faTurnover)+' 次'],['總資產周轉率',f2(R.taTurnover)+' 次']])}
+                    <strong>📊 財務比率分析</strong>（資料季別 ${R.date}，${R.isFinance?'金融業比率':'週轉率以期末餘額估算'}）<br>
+                    ${liquidity}
+                    ${assetMgmt}
                     ${sec('3. 負債管理能力比率',[['負債比率',pct(R.debtRatio)]])}
                     <div style="font-size:12px;color:#a0aab2;margin:4px 0 8px;">※ 利息保障倍數需財務成本（利息費用）明細，將於接 FinMind 付費資料後提供。</div>
-                    ${sec('4. 獲利能力比率',[['毛利率',pct(R.grossMargin)],['營運利益率',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]])}
+                    ${profit}
                     ${sec('5. 評價比率',[['本益比 (PER)',perDisplay(R.per, fin?fin.eps:null)],['市價淨值比 (PBR)',R.pbr!==null?R.pbr:'—']])}
                     ${dupont}
                 </div>`;
