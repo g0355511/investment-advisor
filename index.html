@@ -70,6 +70,13 @@
         .rec-card:active { transform:translateY(0); }
         .rec-go { font-size:13px; font-weight:700; color:#3498db; background:#eaf2fb; border-radius:8px; padding:6px 12px; white-space:nowrap; }
         .rec-card:hover .rec-go { background:#3498db; color:#fff; }
+        /* 財務指標 tooltip */
+        .ratio-item .rl { display:inline-flex; align-items:center; gap:3px; }
+        .qm { display:inline-flex; align-items:center; justify-content:center; width:14px; height:14px; border-radius:50%; background:#cbd5e1; color:#fff; font-size:10px; font-weight:700; cursor:help; position:relative; }
+        .qm:hover { background:#3498db; }
+        .qm .tip { visibility:hidden; opacity:0; position:absolute; bottom:130%; left:50%; transform:translateX(-50%); width:240px; background:#1f3a5f; color:#fff; font-size:11px; line-height:1.6; font-weight:400; padding:8px 10px; border-radius:8px; z-index:50; transition:opacity .15s; text-align:left; box-shadow:0 4px 14px rgba(0,0,0,.2); }
+        .qm .tip b { color:#7fd1ff; }
+        .qm:hover .tip { visibility:visible; opacity:1; }
         @media (max-width:480px){ .container{padding:20px;} .input-group{flex-direction:column;} .metrics{grid-template-columns:1fr 1fr;} }
     </style>
 </head>
@@ -244,13 +251,14 @@
             const per=(perArr&&perArr.length)?perArr[perArr.length-1]:null;
             const rev=fin?fin.revenue:null;
             const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
-            let cost=null, opIncome=null, preTax=null, netIncome=fin?fin.netIncome:null;
+            let cost=null, opIncome=null, preTax=null, netIncome=fin?fin.netIncome:null, netIntInc=null;
             if(finRows&&finRows.length){
                 const li=finRows[finRows.length-1].date;
                 const items=finRows.filter(r=>r.date===li);
                 const g=t=>{const x=items.find(r=>r.type===t);return x?x.value:null;};
                 cost=g('CostOfGoodsSold');
                 opIncome=g(isFinance?'NetInterestIncome':'OperatingIncome');
+                netIntInc=g('NetInterestIncome');
                 preTax=g('PreTaxIncome');
                 if(netIncome===null) netIncome=g(isFinance?'IncomeAfterTax':'IncomeAfterTaxes');
             }
@@ -284,6 +292,8 @@
             // 4. 獲利能力
             if(isFinance){
                 r.grossMargin=N_A; r.opMargin=N_A;
+                if(netIntInc!=null&&bs.totalAssets) r.nim=netIntInc/bs.totalAssets*100; // 淨利差 NIM
+                if(netIntInc!=null&&rev) r.netIntRatio=netIntInc/rev*100; // 利息淨收益率
                 if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
             }else{
                 const gp=(rev&&cost!=null)?rev-cost:null;
@@ -363,10 +373,13 @@
             const ratioHtml = ratios ? (()=>{
                 const R=ratios;
                 const N_A='金融業不適用';
+                const asof = `資料時間點：${R.date} 財報`;
                 const f2=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2));
                 const f1=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(1));
                 const pct=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2)+'%');
-                const sec=(title,items)=>`<div class="ratio-sec"><div class="ratio-sec-title">${title}</div><div class="ratio-grid">${items.map(([l,v])=>`<div class="ratio-item"><span class="rl">${l}</span><span class="rv">${v}</span></div>`).join('')}</div></div>`;
+                // 指標項目（含 ❓ tooltip：公式 + 資料時間點）
+                const mi=(label,value,formula)=>`<div class="ratio-item"><span class="rl">${label}<span class="qm">?<span class="tip"><b>公式：</b>${formula}<br>${asof}</span></span></span><span class="rv">${value}</span></div>`;
+                const sec=(title,items)=>`<div class="ratio-sec"><div class="ratio-sec-title">${title}</div><div class="ratio-grid">${items.join('')}</div></div>`;
                 let dupont='';
                 if(R.dupont){
                     if(R.dupont.finance){
@@ -376,23 +389,61 @@
                     }
                 }
                 const liquidity = R.isFinance
-                    ? sec('1. 流動性比率',[['現金佔總負債比',pct(R.cashRatio)],['流動比率',N_A],['速動比率',N_A]])
-                    : sec('1. 流動性比率',[['流動比率',f2(R.currentRatio)],['速動比率',f2(R.quickRatio)],['現金流量比','—']]);
+                    ? sec('1. 流動性比率',[
+                        mi('現金佔總負債比',pct(R.cashRatio),'現金及約當現金 ÷ 總負債'),
+                        mi('流動比率',N_A,'金融業以放款/契約負債為主，無存貨與應收，流動比率不適用'),
+                        mi('速動比率',N_A,'同上')
+                      ])
+                    : sec('1. 流動性比率',[
+                        mi('流動比率',f2(R.currentRatio),'流動資產 ÷ 流動負債'),
+                        mi('速動比率',f2(R.quickRatio),'(流動資產 − 存貨) ÷ 流動負債'),
+                        mi('現金流量比','—','來自現金流量表（FinMind 免費未提供）')
+                      ]);
                 const assetMgmt = R.isFinance
-                    ? sec('2. 資產管理能力比率',[['資產周轉率(營收/總資產)',f2(R.taTurnover)+' 次'],['應收帳款週轉率',N_A],['應收帳款天數',N_A],['存貨週轉率',N_A],['存貨出售天數',N_A],['應付帳款周轉率',N_A],['應付帳款天數',N_A],['固定資產周轉率',N_A]])
-                    : sec('2. 資產管理能力比率',[['應收帳款週轉率',f2(R.arTurnover)+' 次'],['應收帳款天數',f1(R.arDays)+' 天'],['存貨週轉率',f2(R.invTurnover)+' 次'],['存貨出售天數',f1(R.invDays)+' 天'],['應付帳款周轉率',f2(R.apTurnover)+' 次'],['應付帳款天數',f1(R.apDays)+' 天'],['固定資產周轉率',f2(R.faTurnover)+' 次'],['總資產周轉率',f2(R.taTurnover)+' 次']]);
+                    ? sec('2. 資產管理能力比率',[
+                        mi('資產周轉率(營收/總資產)',f2(R.taTurnover)+' 次','營收 ÷ 總資產'),
+                        mi('應收帳款週轉率',N_A,'金融業無應收帳款科目'),
+                        mi('應收帳款天數',N_A,'—'),
+                        mi('存貨週轉率',N_A,'金融業無存貨科目'),
+                        mi('存貨出售天數',N_A,'—'),
+                        mi('應付帳款周轉率',N_A,'金融業無應付帳款科目'),
+                        mi('應付帳款天數',N_A,'—'),
+                        mi('固定資產周轉率',N_A,'金融業以金融資產為主')
+                      ])
+                    : sec('2. 資產管理能力比率',[
+                        mi('應收帳款週轉率',f2(R.arTurnover)+' 次','營收 ÷ 應收帳款淨額'),
+                        mi('應收帳款天數',f1(R.arDays)+' 天','365 ÷ 應收帳款週轉率'),
+                        mi('存貨週轉率',f2(R.invTurnover)+' 次','銷貨成本 ÷ 存貨'),
+                        mi('存貨出售天數',f1(R.invDays)+' 天','365 ÷ 存貨週轉率'),
+                        mi('應付帳款周轉率',f2(R.apTurnover)+' 次','銷貨成本 ÷ 應付帳款'),
+                        mi('應付帳款天數',f1(R.apDays)+' 天','365 ÷ 應付帳款周轉率'),
+                        mi('固定資產周轉率',f2(R.faTurnover)+' 次','營收 ÷ 固定資產(不動產廠房設備)'),
+                        mi('總資產周轉率',f2(R.taTurnover)+' 次','營收 ÷ 總資產')
+                      ]);
                 const profit = R.isFinance
-                    ? sec('4. 獲利能力比率',[['毛利率',N_A],['營運利益率(利息淨收益率)',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]])
-                    : sec('4. 獲利能力比率',[['毛利率',pct(R.grossMargin)],['營運利益率',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]]);
+                    ? sec('4. 獲利能力比率',[
+                        mi('淨利差 (NIM)',pct(R.nim),'利息淨收益 ÷ 總資產'),
+                        mi('利息淨收益率',pct(R.netIntRatio),'利息淨收益 ÷ 營收'),
+                        mi('純益率',pct(R.netMargin),'稅後淨利 ÷ 營收'),
+                        mi('總資產報酬率 (ROA)',pct(R.roa),'稅後淨利 ÷ 總資產'),
+                        mi('權益報酬率 (ROE)',pct(R.roe),'稅後淨利 ÷ 權益')
+                      ])
+                    : sec('4. 獲利能力比率',[
+                        mi('毛利率',pct(R.grossMargin),'(營收 − 銷貨成本) ÷ 營收'),
+                        mi('營運利益率',pct(R.opMargin),'營業利益 ÷ 營收'),
+                        mi('純益率',pct(R.netMargin),'稅後淨利 ÷ 營收'),
+                        mi('總資產報酬率 (ROA)',pct(R.roa),'稅後淨利 ÷ 總資產'),
+                        mi('權益報酬率 (ROE)',pct(R.roe),'稅後淨利 ÷ 權益')
+                      ]);
                 return `
                 <div class="info-box">
                     <strong>📊 財務比率分析</strong>（資料季別 ${R.date}，${R.isFinance?'金融業比率':'週轉率以期末餘額估算'}）<br>
                     ${liquidity}
                     ${assetMgmt}
-                    ${sec('3. 負債管理能力比率',[['負債比率',pct(R.debtRatio)]])}
+                    ${sec('3. 負債管理能力比率',[mi('負債比率',pct(R.debtRatio),'總負債 ÷ 總資產')])}
                     <div style="font-size:12px;color:#a0aab2;margin:4px 0 8px;">※ 利息保障倍數需財務成本（利息費用）明細，將於接 FinMind 付費資料後提供。</div>
                     ${profit}
-                    ${sec('5. 評價比率',[['本益比 (PER)',perDisplay(R.per, fin?fin.eps:null)],['市價淨值比 (PBR)',R.pbr!==null?R.pbr:'—']])}
+                    ${sec('5. 評價比率',[mi('本益比 (PER)',perDisplay(R.per, fin?fin.eps:null),'股價 ÷ 每股盈餘 (EPS)'),mi('市價淨值比 (PBR)',R.pbr!==null?R.pbr:'—','股價 ÷ 每股淨值')])}
                     ${dupont}
                 </div>`;
             })() : `<div class="info-box">📊 財務比率分析：暫無資產負債表資料（${ticker} 可能為新掛牌或資料未揭露）。</div>`;
