@@ -321,22 +321,17 @@
             }
             return r;
         }
-        // 同業基準：先從 STOCK_DB 用 ticker 取自身產業，再比對同業（避免 FinMind 產業名與本地庫不一致）
+        // 同業基準：從 STOCK_DB 讀本地 per（避免 FinMind 在瀏覽器環境偶發空回應）
         async function getIndustryBench(ticker){
             if(!STOCK_DB) return null;
             const self=STOCK_DB.find(s=>s.code===ticker);
             if(!self) return null;
             const industry=self.industry;
-            const peerCodes=STOCK_DB.filter(s=>s.industry===industry && s.code!==ticker).map(s=>s.code);
-            if(peerCodes.length<1) return null;
-            try{
-                const pers=await Promise.all(peerCodes.map(c=>getJSON('TaiwanStockPER',c,1)));
-                const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0);
-                if(vals.length<1) return null;
-                vals.sort((a,b)=>a-b);
-                const mid=vals[Math.floor(vals.length/2)];
-                return { median:mid, n:vals.length, industry };
-            }catch(e){ return null; }
+            const peers=STOCK_DB.filter(s=>s.industry===industry && s.code!==ticker && s.per>0);
+            if(peers.length<1) return null;
+            const vals=peers.map(s=>s.per).sort((a,b)=>a-b);
+            const mid=vals[Math.floor(vals.length/2)];
+            return { median:mid, n:vals.length, industry };
         }
         function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry,bench,volatility}){
             const chg=((close-prevClose)/prevClose*100);
