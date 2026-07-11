@@ -217,7 +217,7 @@
             const cogs=fin?fin.grossProfit:null; // 用毛利率反推? 這裡改用 Revenue-CostOfGoodsSold
             // 損益表細項需另取
             const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
-            let cost=rev, opIncome=null, preTax=null, netIncome=null, nonop=null;
+            let cost=rev, opIncome=null, preTax=null, netIncome=null;
             if(finRows&&finRows.length){
                 const li=finRows[finRows.length-1].date;
                 const items=finRows.filter(r=>r.date===li);
@@ -226,7 +226,6 @@
                 opIncome=g('OperatingIncome');
                 preTax=g('PreTaxIncome');
                 netIncome=g('IncomeAfterTaxes');
-                nonop=g('TotalNonoperatingIncomeAndExpense');
             }
             const gp=(rev&&cost!=null)?rev-cost:null;
             const r={ date:bs.date };
@@ -246,9 +245,6 @@
             if(rev&&bs.totalAssets) r.taTurnover=rev/bs.totalAssets;
             // 3. 負債管理
             r.debtRatio=(bs.totalLiab&&bs.totalAssets)?bs.totalLiab/bs.totalAssets*100:null;
-            // 利息保障倍數：無利息費用明細，以稅前利益/營業外支出近似(若營業外為淨支出)
-            if(preTax!=null && nonop!=null && nonop<0) r.interestCoverage=preTax/(-nonop);
-            else if(preTax!=null) r.interestCoverage=null; // 資料不足
             // 4. 獲利能力
             if(gp!=null&&rev) r.grossMargin=gp/rev*100;
             if(opIncome!=null&&rev) r.opMargin=opIncome/rev*100;
@@ -329,7 +325,8 @@
                     <strong>📊 財務比率分析</strong>（資料季別 ${R.date}，週轉率以期末餘額估算）<br>
                     ${sec('1. 流動性比率',[['流動比率',f2(R.currentRatio)],['速動比率',f2(R.quickRatio)],['現金流量比','—']])}
                     ${sec('2. 資產管理能力比率',[['應收帳款週轉率',f2(R.arTurnover)+' 次'],['應收帳款天數',f1(R.arDays)+' 天'],['存貨週轉率',f2(R.invTurnover)+' 次'],['存貨出售天數',f1(R.invDays)+' 天'],['應付帳款周轉率',f2(R.apTurnover)+' 次'],['應付帳款天數',f1(R.apDays)+' 天'],['固定資產周轉率',f2(R.faTurnover)+' 次'],['總資產周轉率',f2(R.taTurnover)+' 次']])}
-                    ${sec('3. 負債管理能力比率',[['負債比率',pct(R.debtRatio)],['利息保障倍數',R.interestCoverage!==null?f2(R.interestCoverage)+' 倍':'資料不足']])}
+                    ${sec('3. 負債管理能力比率',[['負債比率',pct(R.debtRatio)]])}
+                    <div style="font-size:12px;color:#a0aab2;margin:4px 0 8px;">※ 利息保障倍數需財務成本（利息費用）明細，將於接 FinMind 付費資料後提供。</div>
                     ${sec('4. 獲利能力比率',[['毛利率',pct(R.grossMargin)],['營運利益率',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]])}
                     ${sec('5. 評價比率',[['本益比 (PER)',perDisplay(R.per, fin?fin.eps:null)],['市價淨值比 (PBR)',R.pbr!==null?R.pbr:'—']])}
                     ${dupont}
