@@ -403,8 +403,9 @@
             const fin=await getFin(ticker,isFinance);
             // 財務比率 + 同業基準（獨立抓取不阻塞主流程）
             let ratios=null, bench=null, volatility=null;
+            const industryNow = info ? info.industry_category : '—';
             try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
-            try{ bench=await getIndustryBench(industry); }catch(e){ bench=null; }
+            try{ bench=await getIndustryBench(industryNow); }catch(e){ bench=null; }
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
