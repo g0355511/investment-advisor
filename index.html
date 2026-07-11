@@ -429,7 +429,7 @@
             let ratios=null, bench=null, volatility=null;
             const industryNow = info ? info.industry_category : '—';
             try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
-            try{ bench=await getIndustryBench(ticker); }catch(e){ bench=null; }
+            bench=null; // 暫時註解 getIndustryBench 以隔離問題
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
