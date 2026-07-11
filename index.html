@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<!-- investment-advisor v3: 真實資料 (FinMind API) + 技術指標 + 自動建議 -->
+<!-- investment-advisor v4: 真實資料 + 公司基本資料 + 投資人屬性問卷 -->
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -7,170 +7,207 @@
     <title>投資建議系統</title>
     <style>
         * { box-sizing: border-box; }
-        body {
-            font-family: 'Microsoft JhengHei', 'PingFang TC', sans-serif;
-            margin: 0; padding: 20px;
-            background: linear-gradient(135deg, #f5f7fa 0%, #e4edf5 100%);
-            min-height: 100vh;
-        }
-        .container {
-            max-width: 680px; margin: 0 auto; background: white;
-            padding: 32px; border-radius: 16px;
-            box-shadow: 0 8px 30px rgba(0,0,0,0.08);
-        }
-        h1 { text-align: center; color: #1a2a3a; margin: 0 0 8px; font-size: 26px; }
-        .subtitle { text-align: center; color: #7f8c8d; font-size: 14px; margin-bottom: 24px; }
-        .input-group { display: flex; gap: 12px; margin-bottom: 20px; }
-        input[type="text"] {
-            flex: 1; padding: 14px 18px; border: 2px solid #e0e6ed;
-            border-radius: 10px; font-size: 16px; transition: border-color 0.3s;
-        }
-        input[type="text"]:focus { outline: none; border-color: #3498db; }
-        button {
-            padding: 14px 26px; background: linear-gradient(135deg, #3498db, #2c3e50);
-            color: white; border: none; border-radius: 10px; font-size: 16px;
-            font-weight: 600; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;
-            white-space: nowrap;
-        }
-        button:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(52,152,219,0.35); }
-        button:active { transform: translateY(0); }
-        #result { margin-top: 8px; }
-        .placeholder { text-align: center; color: #95a5a6; padding: 40px 20px; font-size: 15px; }
-        .stock-header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-        .stock-name { font-size: 22px; font-weight: 700; color: #1a2a3a; }
-        .stock-code { font-size: 15px; color: #7f8c8d; }
-        .stock-date { font-size: 13px; color: #a0aab2; margin-left: auto; }
-        .stock-price { width: 100%; text-align: left; margin-bottom: 14px; }
-        .price-num { font-size: 30px; font-weight: 700; color: #1a2a3a; }
-        .price-change { font-size: 16px; font-weight: 600; margin-left: 10px; }
-        .up { color: #e74c3c; } .down { color: #27ae60; } .flat { color: #7f8c8d; }
-        .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 18px; }
-        .metric { background: #f8fafc; border: 1px solid #edf1f5; border-radius: 10px; padding: 12px 10px; text-align: center; }
-        .metric-label { font-size: 12px; color: #7f8c8d; margin-bottom: 4px; }
-        .metric-value { font-size: 17px; font-weight: 600; color: #1a2a3a; }
-        .tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-        .tag { font-size: 12px; padding: 4px 10px; border-radius: 20px; font-weight: 600; }
-        .tag-pos { background: #e8f8f0; color: #1e8449; }
-        .tag-neu { background: #eaf2fb; color: #2471a3; }
-        .tag-warn { background: #fef5e7; color: #b9770e; }
-        .advice {
-            background: linear-gradient(135deg, #eef6ff, #f4f9ff);
-            border-left: 4px solid #3498db; border-radius: 10px;
-            padding: 18px 20px; line-height: 1.7; color: #2c3e50; font-size: 15px;
-        }
-        .advice-title { font-weight: 700; color: #1a2a3a; margin-bottom: 8px; font-size: 16px; }
-        .disclaimer { margin-top: 18px; font-size: 12px; color: #a0aab2; line-height: 1.6; border-top: 1px dashed #e0e6ed; padding-top: 12px; }
-        .loading { text-align: center; color: #95a5a6; padding: 40px; font-style: italic; }
-        .error-box { background: #fdf2f2; border-left: 4px solid #e74c3c; border-radius: 10px; padding: 18px 20px; color: #c0392b; line-height: 1.7; }
-        .src { text-align: center; font-size: 12px; color: #b0b8be; margin-top: 10px; }
-        @media (max-width: 480px) {
-            .container { padding: 20px; }
-            .input-group { flex-direction: column; }
-            .metrics { grid-template-columns: 1fr 1fr; }
-        }
+        body { font-family: 'Microsoft JhengHei','PingFang TC',sans-serif; margin:0; padding:20px; background:linear-gradient(135deg,#f5f7fa,#e4edf5); min-height:100vh; }
+        .container { max-width:720px; margin:0 auto; background:white; padding:32px; border-radius:16px; box-shadow:0 8px 30px rgba(0,0,0,0.08); }
+        h1 { text-align:center; color:#1a2a3a; margin:0 0 6px; font-size:26px; }
+        .subtitle { text-align:center; color:#7f8c8d; font-size:14px; margin-bottom:24px; }
+        .section { margin-bottom:30px; }
+        .section-title { font-size:18px; font-weight:700; color:#1a2a3a; margin-bottom:14px; border-left:4px solid #3498db; padding-left:10px; }
+        .input-group { display:flex; gap:12px; }
+        input[type="text"] { flex:1; padding:14px 18px; border:2px solid #e0e6ed; border-radius:10px; font-size:16px; transition:border-color .3s; }
+        input[type="text"]:focus { outline:none; border-color:#3498db; }
+        button { padding:14px 26px; background:linear-gradient(135deg,#3498db,#2c3e50); color:white; border:none; border-radius:10px; font-size:16px; font-weight:600; cursor:pointer; transition:transform .2s,box-shadow .2s; white-space:nowrap; }
+        button:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(52,152,219,.35); }
+        button:active { transform:translateY(0); }
+        #result { margin-top:8px; }
+        .placeholder { text-align:center; color:#95a5a6; padding:40px 20px; font-size:15px; }
+        .stock-header { display:flex; align-items:baseline; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+        .stock-name { font-size:22px; font-weight:700; color:#1a2a3a; }
+        .stock-code { font-size:15px; color:#7f8c8d; }
+        .stock-industry { font-size:13px; background:#eaf2fb; color:#2471a3; padding:3px 10px; border-radius:20px; }
+        .stock-date { font-size:13px; color:#a0aab2; margin-left:auto; }
+        .stock-price { width:100%; text-align:left; margin-bottom:14px; }
+        .price-num { font-size:30px; font-weight:700; color:#1a2a3a; }
+        .price-change { font-size:16px; font-weight:600; margin-left:10px; }
+        .up { color:#e74c3c; } .down { color:#27ae60; } .flat { color:#7f8c8d; }
+        .metrics { display:grid; grid-template-columns:repeat(3,1fr); gap:10px; margin-bottom:16px; }
+        .metric { background:#f8fafc; border:1px solid #edf1f5; border-radius:10px; padding:12px 8px; text-align:center; }
+        .metric-label { font-size:12px; color:#7f8c8d; margin-bottom:4px; }
+        .metric-value { font-size:16px; font-weight:600; color:#1a2a3a; }
+        .info-box { background:#fbfcfe; border:1px solid #edf1f5; border-radius:10px; padding:14px 16px; margin-bottom:16px; font-size:14px; line-height:1.8; color:#34495e; }
+        .tags { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+        .tag { font-size:12px; padding:4px 10px; border-radius:20px; font-weight:600; }
+        .tag-pos { background:#e8f8f0; color:#1e8449; } .tag-neu { background:#eaf2fb; color:#2471a3; } .tag-warn { background:#fef5e7; color:#b9770e; }
+        .advice { background:linear-gradient(135deg,#eef6ff,#f4f9ff); border-left:4px solid #3498db; border-radius:10px; padding:18px 20px; line-height:1.7; color:#2c3e50; font-size:15px; }
+        .advice-title { font-weight:700; color:#1a2a3a; margin-bottom:8px; font-size:16px; }
+        .disclaimer { margin-top:18px; font-size:12px; color:#a0aab2; line-height:1.6; border-top:1px dashed #e0e6ed; padding-top:12px; }
+        .loading { text-align:center; color:#95a5a6; padding:40px; font-style:italic; }
+        .error-box { background:#fdf2f2; border-left:4px solid #e74c3c; border-radius:10px; padding:18px 20px; color:#c0392b; line-height:1.7; }
+        .src { text-align:center; font-size:12px; color:#b0b8be; margin-top:8px; }
+        /* 問卷 */
+        .q-row { margin-bottom:16px; }
+        .q-label { font-size:14px; font-weight:600; color:#2c3e50; margin-bottom:8px; }
+        .opts { display:flex; flex-wrap:wrap; gap:8px; }
+        .opt { font-size:13px; padding:8px 14px; border:2px solid #e0e6ed; border-radius:20px; cursor:pointer; background:white; color:#34495e; transition:all .2s; }
+        .opt:hover { border-color:#3498db; }
+        .opt.sel { background:#3498db; border-color:#3498db; color:white; }
+        .rec-list { display:flex; flex-direction:column; gap:10px; }
+        .rec-card { display:flex; align-items:center; gap:12px; background:#f8fafc; border:1px solid #edf1f5; border-radius:10px; padding:12px 16px; }
+        .rec-rank { font-size:20px; font-weight:700; color:#3498db; width:28px; text-align:center; }
+        .rec-info { flex:1; }
+        .rec-name { font-weight:700; color:#1a2a3a; font-size:15px; }
+        .rec-ind { font-size:12px; color:#7f8c8d; }
+        .rec-score { font-size:12px; color:#2471a3; }
+        @media (max-width:480px){ .container{padding:20px;} .input-group{flex-direction:column;} .metrics{grid-template-columns:1fr 1fr;} }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>📈 投資建議系統</h1>
-        <div class="subtitle">輸入台股代號，取得真實即時資料、技術指標與投資建議</div>
-        <div class="input-group">
-            <input type="text" id="ticker" placeholder="輸入台股代號（例如 2330）" maxlength="6">
-            <button id="fetchBtn">取得建議</button>
+        <div class="subtitle">真實資料 · 技術指標 · 企業基本資料 · 投資人屬性問卷</div>
+
+        <div class="section">
+            <div class="section-title">🔍 個股分析</div>
+            <div class="input-group">
+                <input type="text" id="ticker" placeholder="輸入台股代號（例如 2330）" maxlength="6">
+                <button id="fetchBtn">取得建議</button>
+            </div>
+            <div id="result"><div class="placeholder">請輸入股票代號以取得投資分析</div></div>
+            <div class="src">資料來源：FinMind 台灣金融資料集（公開 API）</div>
         </div>
-        <div id="result">
-            <div class="placeholder">請輸入股票代號以取得投資分析</div>
+
+        <div class="section">
+            <div class="section-title">📋 投資人屬性問卷</div>
+            <div class="q-row"><div class="q-label">1. 您的年齡層？</div><div class="opts" data-q="age">
+                <span class="opt" data-v="young">30 歲以下</span>
+                <span class="opt" data-v="mid">31–55 歲</span>
+                <span class="opt" data-v="old">56 歲以上</span>
+            </div></div>
+            <div class="q-row"><div class="q-label">2. 預計投資期限？</div><div class="opts" data-q="horizon">
+                <span class="opt" data-v="short">短線（&lt;1 年）</span>
+                <span class="opt" data-v="mid">中期（1–5 年）</span>
+                <span class="opt" data-v="long">長期（&gt;5 年）</span>
+            </div></div>
+            <div class="q-row"><div class="q-label">3. 風險承受度？</div><div class="opts" data-q="risk">
+                <span class="opt" data-v="conservative">保守（怕虧損）</span>
+                <span class="opt" data-v="moderate">穩健（可承受小幅波動）</span>
+                <span class="opt" data-v="aggressive">積極（追求高報酬）</span>
+            </div></div>
+            <div class="q-row"><div class="q-label">4. 是否重視股利收入？</div><div class="opts" data-q="income">
+                <span class="opt" data-v="yes">是，重視現金流</span>
+                <span class="opt" data-v="no">否，重視資本利得</span>
+            </div></div>
+            <div class="q-row"><div class="q-label">5. 偏好產業？</div><div class="opts" data-q="industry">
+                <span class="opt" data-v="tech">科技/半導體</span>
+                <span class="opt" data-v="finance">金融/高殖利率</span>
+                <span class="opt" data-v="traditional">傳統產業</span>
+                <span class="opt" data-v="esg">永續/ESG</span>
+                <span class="opt" data-v="any">皆可</span>
+            </div></div>
+            <button id="quizBtn">依屬性推薦標的</button>
+            <div id="quizResult" style="margin-top:18px;"></div>
         </div>
-        <div class="src">資料來源：FinMind 台灣金融資料集（公開 API）</div>
     </div>
 
+    <script src="stockdb.js"></script>
     <script>
-        const API = 'https://api.finmindtrade.com/api/v4/data';
-        // 取得最近 N 個交易日（含今日）的日線
-        function fmtDate(d) { return d.toISOString().slice(0,10); }
-        async function getPrice(ticker) {
-            const end = fmtDate(new Date());
-            const startObj = new Date(); startObj.setDate(startObj.getDate() - 120);
-            const start = fmtDate(startObj);
-            const url = `${API}?dataset=TaiwanStockPrice&data_id=${ticker}&start_date=${start}&end_date=${end}`;
-            const r = await fetch(url);
-            const j = await r.json();
-            if (j.msg !== 'success' || !j.data || j.data.length === 0) throw new Error('no_data');
-            return j.data;
+        const API='https://api.finmindtrade.com/api/v4/data';
+        const fmtDate=d=>d.toISOString().slice(0,10);
+        async function getJSON(dataset,ticker,days){
+            const end=fmtDate(new Date());
+            const s=new Date(); s.setDate(s.getDate()-days); const start=fmtDate(s);
+            const url=`${API}?dataset=${dataset}&data_id=${ticker}&start_date=${start}&end_date=${end}`;
+            const r=await fetch(url); const j=await r.json();
+            return (j.msg==='success'&&j.data)?j.data:null;
         }
-        async function getPer(ticker) {
-            const end = fmtDate(new Date());
-            const startObj = new Date(); startObj.setDate(startObj.getDate() - 10);
-            const start = fmtDate(startObj);
-            const url = `${API}?dataset=TaiwanStockPER&data_id=${ticker}&start_date=${start}&end_date=${end}`;
-            const r = await fetch(url);
-            const j = await r.json();
-            if (j.msg !== 'success' || !j.data || j.data.length === 0) return null;
-            return j.data[j.data.length - 1];
+        function ma(c,n){ return c.length>=n?c.slice(-n).reduce((a,b)=>a+b,0)/n:null; }
+        function rsi(c,n=14){
+            if(c.length<n+1) return null;
+            const d=[]; for(let i=1;i<c.length;i++) d.push(c[i]-c[i-1]);
+            const l=d.slice(-n);
+            const up=l.filter(x=>x>0).reduce((a,b)=>a+b,0)/n;
+            const dn=l.filter(x=>x<0).reduce((a,b)=>a-b,0)/n;
+            if(dn===0) return 100;
+            return Math.round((100-100/(1+up/dn))*10)/10;
         }
-        function ma(closes, n) { return closes.length >= n ? closes.slice(-n).reduce((a,b)=>a+b,0)/n : null; }
-        function rsi(closes, n=14) {
-            if (closes.length < n+1) return null;
-            const diffs = [];
-            for (let i=1;i<closes.length;i++) diffs.push(closes[i]-closes[i-1]);
-            const last = diffs.slice(-n);
-            const up = last.filter(x=>x>0).reduce((a,b)=>a+b,0)/n;
-            const dn = last.filter(x=>x<0).reduce((a,b)=>a-b,0)/n;
-            if (dn === 0) return 100;
-            const rs = up/dn;
-            return Math.round((100 - 100/(1+rs)) * 10) / 10;
+        async function getInfo(ticker){
+            const url=`${API}?dataset=TaiwanStockInfo&data_id=${ticker}`;
+            const r=await fetch(url); const j=await r.json();
+            if(j.msg==='success'&&j.data&&j.data.length){ return j.data[j.data.length-1]; }
+            return null;
         }
-        function buildAdvice({ close, prevClose, per, ma20, ma60, rsiVal }) {
-            const chg = ((close - prevClose)/prevClose*100);
-            const tags = [];
-            const reasons = [];
-            // 趨勢
-            if (ma20 && ma60) {
-                if (close > ma20 && ma20 > ma60) { tags.push(['多頭排列','tag-pos']); reasons.push('股價站穩在月線與季線之上，呈現多頭排列，中長期趨勢偏多。'); }
-                else if (close < ma20 && ma20 < ma60) { tags.push(['空頭排列','tag-warn']); reasons.push('股價跌破月線與季線，呈現空頭排列，短期需留意下行風險。'); }
-                else { tags.push(['盤整格局','tag-neu']); reasons.push('均線糾結，目前處於區間盤整，方向尚不明確。'); }
-            }
-            // 估值
-            if (per && per.PER) {
-                if (per.PER < 15) { tags.push(['本益比偏低','tag-pos']); reasons.push(`本益比 ${per.PER} 處於相對低位，具備價值投資吸引力。`); }
-                else if (per.PER > 30) { tags.push(['本益比偏高','tag-warn']); reasons.push(`本益比 ${per.PER} 偏高，須注意評價是否合理反映成長預期。`); }
-                else { tags.push(['本益比合理','tag-neu']); reasons.push(`本益比 ${per.PER} 處於中性區間，估值尚稱合理。`); }
-            }
-            // RSI
-            if (rsiVal !== null) {
-                if (rsiVal >= 70) { tags.push(['RSI 過熱','tag-warn']); reasons.push(`RSI ${rsiVal} 進入超買區，短期可能面臨獲利了結賣壓。`); }
-                else if (rsiVal <= 30) { tags.push(['RSI 超賣','tag-pos']); reasons.push(`RSI ${rsiVal} 進入超賣區，具備技術面反彈條件。`); }
-                else { tags.push(['RSI 中性','tag-neu']); reasons.push(`RSI ${rsiVal} 位於中性區間，買賣力道平衡。`); }
-            }
-            // 殖利率
-            if (per && per.dividend_yield) {
-                if (per.dividend_yield >= 4) { tags.push(['高殖利率','tag-pos']); reasons.push(`殖利率約 ${per.dividend_yield}%，適合作為穩定現金流標的。`); }
-            }
-            const summary = reasons.length ? reasons.join('') : '依據目前可取得之技術與基本面資料綜合判斷。';
-            return { tags, summary, chg };
+        async function getFin(ticker){
+            const rows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
+            if(!rows) return null;
+            const latest=rows[rows.length-1].date;
+            const items=rows.filter(r=>r.date===latest);
+            const get=t=>{ const x=items.find(r=>r.type===t); return x?x.value:null; };
+            return { date:latest, eps:get('EPS'), revenue:get('Revenue'), grossProfit:get('GrossProfit'), netIncome:get('IncomeAfterTaxes') };
         }
-        function render(rows, per) {
-            const last = rows[rows.length-1];
-            const prev = rows.length > 1 ? rows[rows.length-2] : last;
-            const closes = rows.map(r => r.close);
-            const ma20 = ma(closes, 20), ma60 = ma(closes, 60), rsiVal = rsi(closes);
-            const close = last.close, prevClose = prev.close;
-            const { tags, summary, chg } = buildAdvice({ close, prevClose, per, ma20, ma60, rsiVal });
-            const cc = chg > 0 ? 'up' : (chg < 0 ? 'down' : 'flat');
-            const sign = chg > 0 ? '+' : '';
-            const tagHtml = tags.map(t => `<span class="tag ${t[1]}">${t[0]}</span>`).join('');
+        function fmtNum(v){
+            if(v===null||v===undefined) return '—';
+            if(Math.abs(v)>=1e8) return (v/1e8).toFixed(2)+' 億';
+            if(Math.abs(v)>=1e4) return (v/1e4).toFixed(2)+' 萬';
+            return v.toLocaleString();
+        }
+        function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal}){
+            const chg=((close-prevClose)/prevClose*100);
+            const tags=[],reasons=[];
+            if(ma20&&ma60){
+                if(close>ma20&&ma20>ma60){tags.push(['多頭排列','tag-pos']);reasons.push('股價站穩月線與季線之上，中長期趨勢偏多。');}
+                else if(close<ma20&&ma20<ma60){tags.push(['空頭排列','tag-warn']);reasons.push('股價跌破月線與季線，短期留意下行風險。');}
+                else {tags.push(['盤整格局','tag-neu']);reasons.push('均線糾結，目前區間盤整，方向未明。');}
+            }
+            if(per&&per.PER){
+                if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`本益比 ${per.PER} 相對低位，具價值投資吸引力。`);}
+                else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`本益比 ${per.PER} 偏高，須注意評價合理性。`);}
+                else{tags.push(['本益比合理','tag-neu']);reasons.push(`本益比 ${per.PER} 中性區間，估值尚稱合理。`);}
+            }
+            if(rsiVal!==null){
+                if(rsiVal>=70){tags.push(['RSI過熱','tag-warn']);reasons.push(`RSI ${rsiVal} 超買，短期或面臨賣壓。`);}
+                else if(rsiVal<=30){tags.push(['RSI超賣','tag-pos']);reasons.push(`RSI ${rsiVal} 超賣，具技術反彈條件。`);}
+                else{tags.push(['RSI中性','tag-neu']);reasons.push(`RSI ${rsiVal} 中性區間。`);}
+            }
+            if(per&&per.dividend_yield&&per.dividend_yield>=4){tags.push(['高殖利率','tag-pos']);reasons.push(`殖利率約 ${per.dividend_yield}%，適合穩定現金流。`);}
+            return {tags,summary:reasons.join('')||'依目前技術與基本面資料綜合判斷。',chg};
+        }
+        async function render(ticker){
+            const [rows,per,info,fin]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,10),getInfo(ticker),getFin(ticker)]);
+            if(!rows||!rows.length) throw new Error('no_data');
+            const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
+            const closes=rows.map(r=>r.close);
+            const ma20=ma(closes,20),ma60=ma(closes,60),rsiVal=rsi(closes);
+            const close=last.close,prevClose=prev.close;
+            const {tags,summary,chg}=buildAdvice({close,prevClose,per,ma20,ma60,rsiVal});
+            const cc=chg>0?'up':(chg<0?'down':'flat'); const sign=chg>0?'+':'';
+            const name=info?info.stock_name:ticker;
+            const industry=info?info.industry_category:'—';
+            const tagHtml=tags.map(t=>`<span class="tag ${t[1]}">${t[0]}</span>`).join('');
+            const finHtml = fin ? `
+                <div class="info-box">
+                    <strong>📄 公司基本資料</strong><br>
+                    公司名稱：${name}（${ticker}）<br>
+                    所屬產業：${industry}<br>
+                    最新財報季：${fin.date}<br>
+                    每股盈餘 (EPS)：${fin.eps!==null?fin.eps:'—'}<br>
+                    營收：${fmtNum(fin.revenue)}<br>
+                    毛利：${fmtNum(fin.grossProfit)}<br>
+                    稅後淨利：${fmtNum(fin.netIncome)}
+                </div>` : `<div class="info-box">公司名稱：${name}（${ticker}）<br>所屬產業：${industry}</div>`;
             return `
                 <div class="stock-header">
-                    <span class="stock-name">${last.stock_id}</span>
-                    <span class="stock-code">台股</span>
+                    <span class="stock-name">${name}</span>
+                    <span class="stock-code">${ticker}</span>
+                    <span class="stock-industry">${industry}</span>
                     <span class="stock-date">資料日期 ${last.date}</span>
                 </div>
                 <div class="stock-price">
                     <span class="price-num">${close.toLocaleString()}</span>
                     <span class="price-change ${cc}">${sign}${chg.toFixed(2)}%</span>
                 </div>
+                ${finHtml}
                 <div class="metrics">
-                    <div class="metric"><div class="metric-label">本益比 (PER)</div><div class="metric-value">${per&&per.PER?per.PER:'—'}</div></div>
+                    <div class="metric"><div class="metric-label">本益比</div><div class="metric-value">${per&&per.PER?per.PER:'—'}</div></div>
                     <div class="metric"><div class="metric-label">殖利率</div><div class="metric-value">${per&&per.dividend_yield?per.dividend_yield+'%':'—'}</div></div>
                     <div class="metric"><div class="metric-label">股價淨值比</div><div class="metric-value">${per&&per.PBR?per.PBR:'—'}</div></div>
                     <div class="metric"><div class="metric-label">MA20</div><div class="metric-value">${ma20?ma20.toFixed(1):'—'}</div></div>
@@ -180,31 +217,55 @@
                 <div class="tags">${tagHtml}</div>
                 <div class="advice">
                     <div class="advice-title">📊 投資建議</div>
-                    <div>${summary}投資人可結合自身風險屬性（保守／穩健／積極）與投資期限（短線／中長期）決定配置比重，並建議採分批進場以分散時點風險。</div>
+                    <div>${summary}投資人可結合自身風險屬性與投資期限決定配置比重，建議分批進場以分散時點風險。</div>
                 </div>
-                <div class="disclaimer">
-                    本網頁內容僅供參考，非買賣邀約或投資建議。投資有風險，過去績效不代表未來表現，請依自身風險承受度審慎評估，必要時諮詢合格證券投顧或財務顧問。資料來源為 FinMind 公開 API，可能有延遲或誤差。
-                </div>
+                <div class="disclaimer">本網頁內容僅供參考，非買賣邀約或投資建議。投資有風險，過去績效不代表未來表現，請依自身風險承受度審慎評估，必要時諮詢合格證券投顧或財務顧問。資料來源為 FinMind 公開 API，可能有延遲或誤差。</div>
             `;
         }
-        function show(html, isError) {
-            const box = document.getElementById('result');
-            box.innerHTML = isError ? `<div class="error-box">${html}</div>` : html;
+        function show(html,isErr){ const b=document.getElementById('result'); b.innerHTML=isErr?`<div class="error-box">${html}</div>`:html; }
+        async function run(){
+            const ticker=document.getElementById('ticker').value.trim().toUpperCase();
+            if(!ticker){show('請輸入有效的股票代號。',true);return;}
+            if(!/^\d{4,5}$/.test(ticker)){show('台股代號應為 4–5 位數字（例如 2330）。',true);return;}
+            show('<div class="loading">正在取得即時資料、技術指標與公司基本資料…</div>',false);
+            try{ show(await render(ticker),false); }
+            catch(e){ show(`無法取得 ${ticker} 的資料。可能原因：<br>1. 該代號非上市櫃股票或暫無交易。<br>2. FinMind API 暫時無法連線。<br><br>請確認代號正確，或稍後再試。`,true); }
         }
-        async function run() {
-            const ticker = document.getElementById('ticker').value.trim().toUpperCase();
-            if (!ticker) { show('請輸入有效的股票代號。', true); return; }
-            if (!/^\d{4,5}$/.test(ticker)) { show('台股代號應為 4–5 位數字（例如 2330）。', true); return; }
-            show('<div class="loading">正在從 FinMind 取得了即時資料與技術指標…</div>', false);
-            try {
-                const [rows, per] = await Promise.all([getPrice(ticker), getPer(ticker)]);
-                show(render(rows, per), false);
-            } catch (e) {
-                show(`無法取得 ${ticker} 的資料。可能原因：<br>1. 該代號非上市櫃股票或暫無交易。<br>2. FinMind API 暫時無法連線。<br><br>請確認代號正確，或稍後再試。`, true);
-            }
-        }
-        document.getElementById('fetchBtn').addEventListener('click', run);
-        document.getElementById('ticker').addEventListener('keypress', e => { if (e.key === 'Enter') run(); });
+        // 問卷
+        document.querySelectorAll('.opts').forEach(g=>{
+            g.addEventListener('click',e=>{
+                if(e.target.classList.contains('opt')){
+                    g.querySelectorAll('.opt').forEach(o=>o.classList.remove('sel'));
+                    e.target.classList.add('sel');
+                }
+            });
+        });
+        document.getElementById('quizBtn').addEventListener('click',()=>{
+            const ans={};
+            document.querySelectorAll('.opts').forEach(g=>{
+                const sel=g.querySelector('.opt.sel');
+                ans[g.dataset.q]=sel?sel.dataset.v:null;
+            });
+            const missing=Object.entries(ans).filter(([k,v])=>!v).map(([k])=>k);
+            const box=document.getElementById('quizResult');
+            if(missing.length){ box.innerHTML=`<div class="error-box">請完整回答所有問題（尚缺：${missing.join('、')}）。</div>`; return; }
+            const rec=recommend(ans);
+            if(!rec.length){ box.innerHTML=`<div class="error-box">依目前設定暫無合適標的，請調整偏好。</div>`; return; }
+            box.innerHTML=`<div class="advice"><div class="advice-title">🎯 依您的屬性推薦標的（Top 5）</div>
+                <div class="rec-list">${rec.map((s,i)=>`
+                    <div class="rec-card">
+                        <div class="rec-rank">${i+1}</div>
+                        <div class="rec-info">
+                            <div class="rec-name">${s.name}（${s.code}）</div>
+                            <div class="rec-ind">${s.industry}</div>
+                            <div class="rec-score">契合度 ${s.score}</div>
+                        </div>
+                    </div>`).join('')}</div>
+                <div style="margin-top:10px;font-size:13px;color:#7f8c8d;">點擊上方「個股分析」輸入代號，可進一步查看該股的真實報價與技術指標。</div>
+            </div>`;
+        });
+        document.getElementById('fetchBtn').addEventListener('click',run);
+        document.getElementById('ticker').addEventListener('keypress',e=>{if(e.key==='Enter')run();});
         document.getElementById('ticker').focus();
     </script>
 </body>
