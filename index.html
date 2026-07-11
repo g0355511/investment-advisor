@@ -112,6 +112,7 @@
     <script src="stockdb.js"></script>
     <script>
         const API='https://api.finmindtrade.com/api/v4/data';
+        const REALTIME_PROXY='https://twse-realtime-proxy.g0355511.workers.dev/?code=';
         const fmtDate=d=>d.toISOString().slice(0,10);
         async function getJSON(dataset,ticker,days){
             const end=fmtDate(new Date());
@@ -129,6 +130,23 @@
             const dn=l.filter(x=>x<0).reduce((a,b)=>a-b,0)/n;
             if(dn===0) return 100;
             return Math.round((100-100/(1+up/dn))*10)/10;
+        }
+        async function getRealtime(ticker){
+            try{
+                const r=await fetch(REALTIME_PROXY+ticker);
+                const t=await r.text();
+                const j=JSON.parse(t);
+                if(j.msgArray&&j.msgArray[0]){
+                    const o=j.msgArray[0];
+                    const price=parseFloat(o.pz);
+                    const prev=parseFloat(o.z||o.y);
+                    const time=o['%']||'';
+                    const up=(o['a']||'').split('_').filter(x=>x).map(Number);
+                    const dn=(o['b']||'').split('_').filter(x=>x).map(Number);
+                    return { price, prev, time, asks:up, bids:dn, ok:true };
+                }
+                return { ok:false };
+            }catch(e){ return { ok:false }; }
         }
         async function getInfo(ticker){
             const url=`${API}?dataset=TaiwanStockInfo&data_id=${ticker}`;
@@ -194,16 +212,17 @@
                     毛利：${fmtNum(fin.grossProfit)}<br>
                     稅後淨利：${fmtNum(fin.netIncome)}
                 </div>` : `<div class="info-box">公司名稱：${name}（${ticker}）<br>所屬產業：${industry}</div>`;
-            return `
+            const html = `
                 <div class="stock-header">
                     <span class="stock-name">${name}</span>
                     <span class="stock-code">${ticker}</span>
                     <span class="stock-industry">${industry}</span>
-                    <span class="stock-date">資料日期 ${last.date}</span>
+                    <span class="stock-date">日線資料 ${last.date}</span>
                 </div>
-                <div class="stock-price">
-                    <span class="price-num">${close.toLocaleString()}</span>
-                    <span class="price-change ${cc}">${sign}${chg.toFixed(2)}%</span>
+                <div class="stock-price" id="realtimeBox">
+                    <span class="price-num" id="rtPrice">${close.toLocaleString()}</span>
+                    <span class="price-change ${cc}" id="rtChg">${sign}${chg.toFixed(2)}%（日線）</span>
+                    <span id="rtTime" style="font-size:12px;color:#a0aab2;margin-left:8px;"></span>
                 </div>
                 ${finHtml}
                 <div class="metrics">
@@ -219,16 +238,39 @@
                     <div class="advice-title">📊 投資建議</div>
                     <div>${summary}投資人可結合自身風險屬性與投資期限決定配置比重，建議分批進場以分散時點風險。</div>
                 </div>
-                <div class="disclaimer">本網頁內容僅供參考，非買賣邀約或投資建議。投資有風險，過去績效不代表未來表現，請依自身風險承受度審慎評估，必要時諮詢合格證券投顧或財務顧問。資料來源為 FinMind 公開 API，可能有延遲或誤差。</div>
+                <div class="disclaimer">本網頁內容僅供參考，非買賣邀約或投資建議。投資有風險，過去績效不代表未來表現，請依自身風險承受度審慎評估，必要時諮詢合格證券投顧或財務顧問。股價即時盤來源為證交所公開資料（經 Cloudflare Worker 代理），日線與基本面來源為 FinMind 公開 API，可能有延遲或誤差。</div>
             `;
+            return html;
+        }
+        let rtTimer=null;
+        async function pollRealtime(ticker){
+            const rt=await getRealtime(ticker);
+            if(!rt.ok) return;
+            const elPrice=document.getElementById('rtPrice');
+            const elChg=document.getElementById('rtChg');
+            const elTime=document.getElementById('rtTime');
+            if(!elPrice) return;
+            const chgPct=((rt.price-rt.prev)/rt.prev*100);
+            const cc=chgPct>0?'up':(chgPct<0?'down':'flat');
+            const sign=chgPct>0?'+':'';
+            elPrice.textContent=rt.price.toLocaleString();
+            elChg.className='price-change '+cc;
+            elChg.textContent=`${sign}${chgPct.toFixed(2)}%（即時）`;
+            elTime.textContent='盤中 '+rt.time;
         }
         function show(html,isErr){ const b=document.getElementById('result'); b.innerHTML=isErr?`<div class="error-box">${html}</div>`:html; }
         async function run(){
             const ticker=document.getElementById('ticker').value.trim().toUpperCase();
             if(!ticker){show('請輸入有效的股票代號。',true);return;}
             if(!/^\d{4,5}$/.test(ticker)){show('台股代號應為 4–5 位數字（例如 2330）。',true);return;}
+            if(rtTimer){ clearInterval(rtTimer); rtTimer=null; }
             show('<div class="loading">正在取得即時資料、技術指標與公司基本資料…</div>',false);
-            try{ show(await render(ticker),false); }
+            try{
+                show(await render(ticker),false);
+                // 啟動盤中即時輪詢（每 5 秒）
+                pollRealtime(ticker);
+                rtTimer=setInterval(()=>pollRealtime(ticker),5000);
+            }
             catch(e){ show(`無法取得 ${ticker} 的資料。可能原因：<br>1. 該代號非上市櫃股票或暫無交易。<br>2. FinMind API 暫時無法連線。<br><br>請確認代號正確，或稍後再試。`,true); }
         }
         // 問卷

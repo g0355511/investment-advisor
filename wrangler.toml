@@ -1,0 +1,6 @@
+name = "twse-realtime-proxy"
+main = "worker.js"
+compatibility_date = "2026-07-11"
+
+# 免費方案即可，不需綁定自訂網域
+# 部署後會得到 https://twse-realtime-proxy.<您的subdomain>.workers.dev
