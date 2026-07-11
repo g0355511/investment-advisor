@@ -324,10 +324,10 @@
         // 同業基準：取資料庫同產業其他標的之 PER 中位數（樣本有限，僅供參考）
         async function getIndustryBench(industry){
             if(!industry || !STOCK_DB) return null;
-            const peers=STOCK_DB.filter(s=>s.industry===industry).map(s=>s.code);
-            if(peers.length<2) return null;
+            const peerCodes=STOCK_DB.filter(s=>s.industry===industry).map(s=>s.code);
+            if(peerCodes.length<2) return null;
             try{
-                const pers=await Promise.all(peers.map(c=>getJSON('TaiwanStockPER',c,1)));
+                const pers=await Promise.all(peerCodes.map(c=>getJSON('TaiwanStockPER',c,1)));
                 const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0);
                 if(vals.length<2) return null;
                 vals.sort((a,b)=>a-b);
