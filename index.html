@@ -65,6 +65,11 @@
         .rec-name { font-weight:700; color:#1a2a3a; font-size:15px; }
         .rec-ind { font-size:12px; color:#7f8c8d; }
         .rec-score { font-size:12px; color:#2471a3; }
+        .rec-card { transition:all .15s ease; }
+        .rec-card:hover { background:#eef6ff; border-color:#3498db; transform:translateY(-1px); box-shadow:0 3px 10px rgba(52,152,219,.12); }
+        .rec-card:active { transform:translateY(0); }
+        .rec-go { font-size:13px; font-weight:700; color:#3498db; background:#eaf2fb; border-radius:8px; padding:6px 12px; white-space:nowrap; }
+        .rec-card:hover .rec-go { background:#3498db; color:#fff; }
         @media (max-width:480px){ .container{padding:20px;} .input-group{flex-direction:column;} .metrics{grid-template-columns:1fr 1fr;} }
     </style>
 </head>
@@ -416,16 +421,25 @@
             if(!rec.length){ box.innerHTML=`<div class="error-box">依目前設定暫無合適標的，請調整偏好。</div>`; return; }
             box.innerHTML=`<div class="advice"><div class="advice-title">🎯 依您的屬性推薦標的（Top 5）</div>
                 <div class="rec-list">${rec.map((s,i)=>`
-                    <div class="rec-card">
+                    <div class="rec-card" data-code="${s.code}" style="cursor:pointer;">
                         <div class="rec-rank">${i+1}</div>
                         <div class="rec-info">
                             <div class="rec-name">${s.name}（${s.code}）</div>
                             <div class="rec-ind">${s.industry}</div>
                             <div class="rec-score">契合度 ${s.score}</div>
                         </div>
+                        <div class="rec-go">▶ 分析</div>
                     </div>`).join('')}</div>
-                <div style="margin-top:10px;font-size:13px;color:#7f8c8d;">點擊上方「個股分析」輸入代號，可進一步查看該股的真實報價與技術指標。</div>
+                <div style="margin-top:10px;font-size:13px;color:#7f8c8d;">點擊任一標的卡片，即自動帶入上方輸入框並執行個股分析。</div>
             </div>`;
+            box.querySelectorAll('.rec-card').forEach(card=>{
+                card.addEventListener('click',()=>{
+                    const code=card.getAttribute('data-code');
+                    document.getElementById('ticker').value=code;
+                    run();
+                    window.scrollTo({top:0,behavior:'smooth'});
+                });
+            });
         });
         document.getElementById('fetchBtn').addEventListener('click',run);
         document.getElementById('ticker').addEventListener('keypress',e=>{if(e.key==='Enter')run();});
