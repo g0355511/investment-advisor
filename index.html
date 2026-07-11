@@ -479,6 +479,30 @@
                     ${dupont}
                 </div>`;
             })() : `<div class="info-box">📊 財務比率分析：暫無資產負債表資料（${ticker} 可能為新掛牌或資料未揭露）。</div>`;
+            // 為何符合您的需求（若已填問卷）
+            let matchHtml='';
+            if(window.userAnswers && STOCK_DB){
+                const want=buildWantTags(window.userAnswers);
+                const s=STOCK_DB.find(x=>x.code===ticker);
+                if(s){
+                    const matched=s.tags.filter(t=>want.has(t));
+                    const tagZh={growth:'成長性',value:'價值股',dividend:'高殖利率',stable:'防禦穩健',tech:'科技產業',traditional:'傳統產業',esg:'永續ESG'};
+                    const needs=answersText(window.userAnswers);
+                    if(matched.length){
+                        matchHtml=`<div class="advice" style="background:linear-gradient(135deg,#f0fbf4,#eafaf1);border-left:4px solid #27ae60;">
+                            <div class="advice-title">✅ 為何符合您的需求</div>
+                            <div>您的需求：${needs}。<br>
+                            本標的（${s.name}）具備 <b>${matched.map(t=>tagZh[t]||t).join('、')}</b> 等特性，與您的屬性相吻合，故由問卷推薦系統選出。建議結合上述技術面與基本面分析綜合判斷。</div>
+                        </div>`;
+                    }else{
+                        matchHtml=`<div class="advice" style="background:linear-gradient(135deg,#fff8f0,#fef5e7);border-left:4px solid #e67e22;">
+                            <div class="advice-title">ℹ️ 關於您的需求</div>
+                            <div>您的需求：${needs}。<br>
+                            本標的（${s.name}）目前主要特性為 <b>${s.tags.map(t=>tagZh[t]||t).join('、')}</b>，與您問卷所設定的偏好標籤不完全吻合，僅供參考，請審慎評估是否符合您的投資目標。</div>
+                        </div>`;
+                    }
+                }
+            }
             const html = `
                 <div class="stock-header">
                     <span class="stock-name">${name}</span>
@@ -506,6 +530,7 @@
                     <div class="advice-title">📊 投資建議</div>
                     <div>${summary}投資人可結合自身風險屬性與投資期限決定配置比重，建議分批進場以分散時點風險。</div>
                 </div>
+                ${matchHtml}
                 <div class="disclaimer">本網頁內容僅供參考，非買賣邀約或投資建議。投資有風險，過去績效不代表未來表現，請依自身風險承受度審慎評估，必要時諮詢合格證券投顧或財務顧問。股價即時盤來源為證交所公開資料（經 Cloudflare Worker 代理），日線與基本面來源為 FinMind 公開 API，可能有延遲或誤差。</div>
             `;
             return html;
@@ -527,6 +552,31 @@
             elTime.textContent='盤中 '+rt.time;
         }
         function show(html,isErr){ const b=document.getElementById('result'); b.innerHTML=isErr?`<div class="error-box">${html}</div>`:html; }
+        // 依使用者問卷答案，重建「期望標籤集合」（與 stockdb.recommend 邏輯一致）
+        function buildWantTags(answers){
+            const set=new Set();
+            const riskMap={conservative:['dividend','stable'],moderate:['value','stable','dividend','growth'],aggressive:['growth','tech']};
+            (riskMap[answers.risk]||[]).forEach(t=>set.add(t));
+            if(answers.income==='yes'){ set.add('dividend'); set.add('stable'); }
+            const indMap={tech:['tech'],finance:['dividend','stable'],traditional:['traditional'],any:[],esg:['esg']};
+            (indMap[answers.industry]||[]).forEach(t=>set.add(t));
+            if(answers.age==='old'){ set.add('stable'); set.add('dividend'); }
+            if(answers.age==='young'){ set.add('growth'); set.add('tech'); }
+            if(answers.horizon==='long'){ set.add('growth'); set.add('value'); }
+            if(answers.horizon==='short'){ set.add('stable'); }
+            return set;
+        }
+        // 將使用者答案轉成中文描述
+        function answersText(ans){
+            const m={
+                age:{young:'30歲以下（追求成長）',mid:'31–55歲（穩健成長）',old:'56歲以上（重視穩健）'},
+                horizon:{short:'短期（<1年）',mid:'中期（1–5年）',long:'長期（>5年）'},
+                risk:{conservative:'保守（怕虧損）',moderate:'穩健（可接受小幅波動）',aggressive:'積極（追求高報酬）'},
+                income:{yes:'重視股利/現金流',no:'重視資本利得'},
+                industry:{tech:'偏好科技/半導體',finance:'偏好金融/高殖利率',traditional:'偏好傳統產業',esg:'偏好永續/ESG',any:'產業無特別偏好'}
+            };
+            return ['age','horizon','risk','income','industry'].map(k=>ans[k]?m[k][ans[k]]:null).filter(Boolean).join('、');
+        }
         async function run(){
             const ticker=document.getElementById('ticker').value.trim().toUpperCase();
             if(!ticker){show('請輸入有效的股票代號。',true);return;}
@@ -559,8 +609,16 @@
             const missing=Object.entries(ans).filter(([k,v])=>!v).map(([k])=>k);
             const box=document.getElementById('quizResult');
             if(missing.length){ box.innerHTML=`<div class="error-box">請完整回答所有問題（尚缺：${missing.join('、')}）。</div>`; return; }
+            // 記錄使用者屬性（供個股分析回扣）
+            window.userAnswers=ans;
             const rec=recommend(ans);
             if(!rec.length){ box.innerHTML=`<div class="error-box">依目前設定暫無合適標的，請調整偏好。</div>`; return; }
+            // 計算每檔標的命中了哪些標籤（對應使用者需求）
+            const wantTagsMap = buildWantTags(ans);
+            rec.forEach(s=>{
+                s.matched = s.tags.filter(t=>wantTagsMap.has(t));
+            });
+            window.userRecs = rec;
             box.innerHTML=`<div class="advice"><div class="advice-title">🎯 依您的屬性推薦標的（Top 5）</div>
                 <div class="rec-list">${rec.map((s,i)=>`
                     <div class="rec-card" data-code="${s.code}" style="cursor:pointer;">
