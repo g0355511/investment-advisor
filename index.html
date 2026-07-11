@@ -321,7 +321,7 @@
             }
             return r;
         }
-        // 同業基準：用全市場產業對照(本地 industry_map.json) 找同業所有代號，並行抓 PER 算中位數
+        // 同業基準：用全市場產業對照(本地 industry_map.json) 找同業代號，分批抓 PER 算中位數（避 FinMind 限流）
         let INDUSTRY_MAP=null;
         async function loadIndustryMap(){
             if(INDUSTRY_MAP) return INDUSTRY_MAP;
@@ -333,13 +333,18 @@
             const map=await loadIndustryMap();
             if(!map || !map[ticker]) return null;
             const industry=map[ticker];
-            // 同業代號（排除自身，最多取 80 檔以控時效）
             let peers=Object.entries(map).filter(([c,ind])=>ind===industry && c!==ticker).map(([c])=>c);
             if(peers.length<3) return { median:null, n:peers.length, industry, note:'同業樣本過少' };
-            if(peers.length>80) peers=peers.sort(()=>Math.random()-0.5).slice(0,80);
+            // 隨機取最多 24 檔，分批抓（每批 8、間隔 250ms）避限流
+            if(peers.length>24) peers=peers.sort(()=>Math.random()-0.5).slice(0,24);
+            const vals=[];
             try{
-                const pers=await Promise.all(peers.map(c=>getJSON('TaiwanStockPER',c,1)));
-                const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0&&v<500);
+                for(let i=0;i<peers.length;i+=8){
+                    const batch=peers.slice(i,i+8);
+                    const pers=await Promise.all(batch.map(c=>getJSON('TaiwanStockPER',c,1)));
+                    pers.forEach(p=>{ const v=(p&&p.length)?p[p.length-1].PER:null; if(v&&v>0&&v<500) vals.push(v); });
+                    if(i+8<peers.length) await new Promise(r=>setTimeout(r,250));
+                }
                 if(vals.length<3) return { median:null, n:vals.length, industry, note:'有效樣本過少' };
                 vals.sort((a,b)=>a-b);
                 const mid=vals[Math.floor(vals.length/2)];
