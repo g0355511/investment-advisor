@@ -374,9 +374,16 @@
             if(per&&per.PER){
                 let benchTxt='';
                 if(bench&&bench.median){ benchTxt=`（同業「${bench.industry}」中位數約 ${bench.median.toFixed(1)}，樣本 ${bench.n} 檔）`; }
-                if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。${benchTxt}`);fundScore+=1;}
-                else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。${benchTxt}`);fundScore-=1;}
-                else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。${benchTxt}`);}
+                if(bench&&bench.median){
+                    const ratio=per.PER/bench.median;
+                    if(ratio<0.85){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 低於同業中位數 ${bench.median.toFixed(1)}（約同業的 ${(ratio*100).toFixed(0)}%），評價相對便宜、具價值吸引力。${benchTxt}`);fundScore+=1;}
+                    else if(ratio>1.15){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 高於同業中位數 ${bench.median.toFixed(1)}（約同業的 ${(ratio*100).toFixed(0)}%），評價相對偏貴，須注意合理性。${benchTxt}`);fundScore-=1;}
+                    else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 與同業中位數 ${bench.median.toFixed(1)} 相當（約同業的 ${(ratio*100).toFixed(0)}%），估值尚稱合理。${benchTxt}`);}
+                }else{
+                    if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。`);fundScore+=1;}
+                    else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。`);fundScore-=1;}
+                    else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。`);}
+                }
             }
             if(per&&per.dividend_yield&&per.dividend_yield>=4){tags.push(['高殖利率','tag-pos']);reasons.push(`【評價】殖利率約 ${per.dividend_yield}%，適合穩定現金流。`);fundScore+=1;}
             // 風險指標：年化波動率
