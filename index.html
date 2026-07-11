@@ -187,9 +187,12 @@
             }catch(e){ return { ok:false }; }
         }
         async function getInfo(ticker){
-            const url=`${API}?dataset=TaiwanStockInfo&data_id=${ticker}`;
-            const r=await fetch(url); const j=await r.json();
-            if(j.msg==='success'&&j.data&&j.data.length){ return j.data[j.data.length-1]; }
+            try{
+                const url=`${API}?dataset=TaiwanStockInfo&data_id=${ticker}`;
+                const r=await fetch(url);
+                const j=await r.json();
+                if(j.msg==='success'&&j.data&&j.data.length){ return j.data[j.data.length-1]; }
+            }catch(e){ console.warn('getInfo failed',ticker,e.message); }
             return null;
         }
         async function getFin(ticker, isFinance){
