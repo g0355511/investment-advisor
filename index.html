@@ -41,6 +41,13 @@
         .advice { background:linear-gradient(135deg,#eef6ff,#f4f9ff); border-left:4px solid #3498db; border-radius:10px; padding:18px 20px; line-height:1.7; color:#2c3e50; font-size:15px; }
         .advice-title { font-weight:700; color:#1a2a3a; margin-bottom:8px; font-size:16px; }
         .disclaimer { margin-top:18px; font-size:12px; color:#a0aab2; line-height:1.6; border-top:1px dashed #e0e6ed; padding-top:12px; }
+        .ratio-sec { margin-top:12px; }
+        .ratio-sec-title { font-weight:700; color:#1a2a3a; font-size:14px; margin-bottom:6px; }
+        .ratio-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:6px 18px; }
+        .ratio-item { display:flex; justify-content:space-between; align-items:baseline; padding:4px 0; border-bottom:1px dotted #eef2f6; font-size:13px; }
+        .ratio-item .rl { color:#64748b; } .ratio-item .rv { font-weight:700; color:#1f3a5f; font-variant-numeric:tabular-nums; }
+        .dupont { margin-top:12px; padding:10px 12px; background:#f0f4ff; border-radius:8px; font-size:13px; line-height:1.7; color:#2c3e50; }
+        .dupont b { color:#1f3a5f; }
         .loading { text-align:center; color:#95a5a6; padding:40px; font-style:italic; }
         .error-box { background:#fdf2f2; border-left:4px solid #e74c3c; border-radius:10px; padding:18px 20px; color:#c0392b; line-height:1.7; }
         .src { text-align:center; font-size:12px; color:#b0b8be; margin-top:8px; }
@@ -181,6 +188,83 @@
             }
             return per;
         }
+        // 資產負債表
+        async function getBalanceSheet(ticker){
+            const rows=await getJSON('TaiwanStockBalanceSheet',ticker,200);
+            if(!rows||!rows.length) return null;
+            const latest=rows[rows.length-1].date;
+            const items=rows.filter(r=>r.date===latest);
+            const get=t=>{ const x=items.find(r=>r.type===t); return x?x.value:null; };
+            return {
+                date:latest,
+                currentAssets:get('CurrentAssets'),
+                currentLiab:get('CurrentLiabilities'),
+                inventory:get('Inventories'),
+                ar:get('AccountsReceivableNet'),
+                ap:get('AccountsPayable'),
+                fixedAssets:get('PropertyPlantAndEquipment'),
+                totalAssets:get('TotalAssets'),
+                totalLiab:get('Liabilities'),
+                equity:get('Equity')
+            };
+        }
+        // 財務比率（結合損益表 + 資產負債表）
+        async function getRatios(ticker){
+            const [bs, fin, perArr]=await Promise.all([getBalanceSheet(ticker),getFin(ticker),getJSON('TaiwanStockPER',ticker,30)]);
+            if(!bs) return null;
+            const per=(perArr&&perArr.length)?perArr[perArr.length-1]:null;
+            const rev=fin?fin.revenue:null;
+            const cogs=fin?fin.grossProfit:null; // 用毛利率反推? 這裡改用 Revenue-CostOfGoodsSold
+            // 損益表細項需另取
+            const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,200);
+            let cost=rev, opIncome=null, preTax=null, netIncome=null, nonop=null;
+            if(finRows&&finRows.length){
+                const li=finRows[finRows.length-1].date;
+                const items=finRows.filter(r=>r.date===li);
+                const g=t=>{const x=items.find(r=>r.type===t);return x?x.value:null;};
+                cost=g('CostOfGoodsSold');
+                opIncome=g('OperatingIncome');
+                preTax=g('PreTaxIncome');
+                netIncome=g('IncomeAfterTaxes');
+                nonop=g('TotalNonoperatingIncomeAndExpense');
+            }
+            const gp=(rev&&cost!=null)?rev-cost:null;
+            const r={ date:bs.date };
+            // 1. 流動性
+            r.currentRatio=(bs.currentAssets&&bs.currentLiab)?bs.currentAssets/bs.currentLiab:null;
+            // 速動比率 = (流動資產-存貨)/流動負債
+            const quick=(bs.currentAssets&&bs.inventory!=null)?bs.currentAssets-bs.inventory:null;
+            r.quickRatio=(quick!=null&&bs.currentLiab)?quick/bs.currentLiab:null;
+            // 2. 資產管理 (週轉率以「期末餘額」估算，天數=365/週轉率)
+            if(rev&&bs.ar) r.arTurnover=rev/bs.ar;
+            if(r.arTurnover) r.arDays=365/r.arTurnover;
+            if(cost!=null&&bs.inventory) r.invTurnover=cost/bs.inventory;
+            if(r.invTurnover) r.invDays=365/r.invTurnover;
+            if(rev&&bs.ap) r.apTurnover=rev/bs.ap;
+            if(r.apTurnover) r.apDays=365/r.apTurnover;
+            if(rev&&bs.fixedAssets) r.faTurnover=rev/bs.fixedAssets;
+            if(rev&&bs.totalAssets) r.taTurnover=rev/bs.totalAssets;
+            // 3. 負債管理
+            r.debtRatio=(bs.totalLiab&&bs.totalAssets)?bs.totalLiab/bs.totalAssets*100:null;
+            // 利息保障倍數：無利息費用明細，以稅前利益/營業外支出近似(若營業外為淨支出)
+            if(preTax!=null && nonop!=null && nonop<0) r.interestCoverage=preTax/(-nonop);
+            else if(preTax!=null) r.interestCoverage=null; // 資料不足
+            // 4. 獲利能力
+            if(gp!=null&&rev) r.grossMargin=gp/rev*100;
+            if(opIncome!=null&&rev) r.opMargin=opIncome/rev*100;
+            if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
+            if(netIncome!=null&&bs.totalAssets) r.roa=netIncome/bs.totalAssets*100;
+            if(netIncome!=null&&bs.equity) r.roe=netIncome/bs.equity*100;
+            // 5. 本益比 / 市價淨值比
+            r.per=(per&&per.PER!=null&&per.PER!==0)?per.PER:null;
+            r.pbr=(per&&per.PBR!=null)?per.PBR:null;
+            // 6. 杜邦方程式: ROE = 純益率 × 總資產周轉率 × 權益乘數
+            if(r.netMargin!=null && r.taTurnover && bs.totalAssets && bs.equity){
+                const equityMult=bs.totalAssets/bs.equity;
+                r.dupont={ netMargin:r.netMargin/100, taTurnover:r.taTurnover, equityMult, roe:r.netMargin/100*r.taTurnover*equityMult*100 };
+            }
+            return r;
+        }
         function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal}){
             const chg=((close-prevClose)/prevClose*100);
             const tags=[],reasons=[];
@@ -205,6 +289,9 @@
         async function render(ticker){
             const [rows,perArr,info,fin]=await Promise.all([getJSON('TaiwanStockPrice',ticker,120),getJSON('TaiwanStockPER',ticker,30),getInfo(ticker),getFin(ticker)]);
             const per = (perArr&&perArr.length)?perArr[perArr.length-1]:null;
+            // 財務比率（資產負債表+損益表，獨立抓取不阻塞主流程）
+            let ratios=null;
+            try{ ratios=await getRatios(ticker); }catch(e){ ratios=null; }
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
@@ -226,6 +313,28 @@
                     毛利：${fmtNum(fin.grossProfit)}<br>
                     稅後淨利：${fmtNum(fin.netIncome)}
                 </div>` : `<div class="info-box">公司名稱：${name}（${ticker}）<br>所屬產業：${industry}</div>`;
+            // 財務比率區塊
+            const ratioHtml = ratios ? (()=>{
+                const R=ratios;
+                const f2=v=>v===null||v===undefined?'—':v.toFixed(2);
+                const f1=v=>v===null||v===undefined?'—':v.toFixed(1);
+                const pct=v=>v===null||v===undefined?'—':v.toFixed(2)+'%';
+                const sec=(title,items)=>`<div class="ratio-sec"><div class="ratio-sec-title">${title}</div><div class="ratio-grid">${items.map(([l,v])=>`<div class="ratio-item"><span class="rl">${l}</span><span class="rv">${v}</span></div>`).join('')}</div></div>`;
+                let dupont='';
+                if(R.dupont){
+                    dupont=`<div class="dupont">杜邦分解：ROE = 純益率(${(R.dupont.netMargin*100).toFixed(2)}%) × 總資產周轉率(${R.dupont.taTurnover.toFixed(2)}) × 權益乘數(${R.dupont.equityMult.toFixed(2)}) = <b>${f1(R.dupont.roe)}%</b></div>`;
+                }
+                return `
+                <div class="info-box">
+                    <strong>📊 財務比率分析</strong>（資料季別 ${R.date}，週轉率以期末餘額估算）<br>
+                    ${sec('1. 流動性比率',[['流動比率',f2(R.currentRatio)],['速動比率',f2(R.quickRatio)],['現金流量比','—']])}
+                    ${sec('2. 資產管理能力比率',[['應收帳款週轉率',f2(R.arTurnover)+' 次'],['應收帳款天數',f1(R.arDays)+' 天'],['存貨週轉率',f2(R.invTurnover)+' 次'],['存貨出售天數',f1(R.invDays)+' 天'],['應付帳款周轉率',f2(R.apTurnover)+' 次'],['應付帳款天數',f1(R.apDays)+' 天'],['固定資產周轉率',f2(R.faTurnover)+' 次'],['總資產周轉率',f2(R.taTurnover)+' 次']])}
+                    ${sec('3. 負債管理能力比率',[['負債比率',pct(R.debtRatio)],['利息保障倍數',R.interestCoverage!==null?f2(R.interestCoverage)+' 倍':'資料不足']])}
+                    ${sec('4. 獲利能力比率',[['毛利率',pct(R.grossMargin)],['營運利益率',pct(R.opMargin)],['純益率',pct(R.netMargin)],['總資產報酬率 (ROA)',pct(R.roa)],['權益報酬率 (ROE)',pct(R.roe)]])}
+                    ${sec('5. 評價比率',[['本益比 (PER)',perDisplay(R.per, fin?fin.eps:null)],['市價淨值比 (PBR)',R.pbr!==null?R.pbr:'—']])}
+                    ${dupont}
+                </div>`;
+            })() : `<div class="info-box">📊 財務比率分析：暫無資產負債表資料（${ticker} 可能為新掛牌或資料未揭露）。</div>`;
             const html = `
                 <div class="stock-header">
                     <span class="stock-name">${name}</span>
@@ -239,6 +348,7 @@
                     <span id="rtTime" style="font-size:12px;color:#a0aab2;margin-left:8px;"></span>
                 </div>
                 ${finHtml}
+                ${ratioHtml}
                 <div class="metrics">
                     <div class="metric"><div class="metric-label">本益比</div><div class="metric-value">${perDisplay(per?per.PER:null, fin?fin.eps:null)}</div></div>
                     <div class="metric"><div class="metric-label">殖利率</div><div class="metric-value">${per&&per.dividend_yield!==null&&per.dividend_yield!==undefined?per.dividend_yield+'%':'—'}</div></div>
