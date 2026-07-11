@@ -266,9 +266,81 @@
                 equity:get('Equity')
             };
         }
-        // 財務比率（結合損益表 + 資產負債表，支援金融業，TTM 口徑）
+        // ===== TWSE OpenAPI 財報兜底（FinMind 限流時不中斷） =====
+        // 綜合損益表：一般產業 t187ap06_L_ci；金融控股業 t187ap06_L_fh
+        // 資產負債表：一般產業 t187ap07_L_ci；金融控股業 t187ap07_L_fh
+        // 註：這兩支 OpenAPI 不帶參數即回全市場最新一季全量（忽略 stockNo/Date），故抓一次全量快取本地過濾。
+        const TWSE_AP06_CI='https://openapi.twse.com.tw/v1/opendata/t187ap06_L_ci';
+        const TWSE_AP07_CI='https://openapi.twse.com.tw/v1/opendata/t187ap07_L_ci';
+        const TWSE_AP06_FH='https://openapi.twse.com.tw/v1/opendata/t187ap06_L_fh';
+        const TWSE_AP07_FH='https://openapi.twse.com.tw/v1/opendata/t187ap07_L_fh';
+        let twseFinCache=null, twseBdCache=null, twseFinHCache=null, twseBdHCache=null;
+        async function fetchTWSEJSON(url){
+            const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),15000);
+            try{ const r=await fetch(url,{signal:ctrl.signal}); clearTimeout(t); if(!r.ok) return null; const j=await r.json(); return Array.isArray(j)?j:null; }
+            catch(e){ clearTimeout(t); console.warn('TWSE 財報 fetch 失敗',url,e.message); return null; }
+        }
+        async function loadTWSEFin(isFinance){ if(isFinance){ if(!twseFinHCache) twseFinHCache=await fetchTWSEJSON(TWSE_AP06_FH); return twseFinHCache; } if(!twseFinCache) twseFinCache=await fetchTWSEJSON(TWSE_AP06_CI); return twseFinCache; }
+        async function loadTWSEBd(isFinance){ if(isFinance){ if(!twseBdHCache) twseBdHCache=await fetchTWSEJSON(TWSE_AP07_FH); return twseBdHCache; } if(!twseBdCache) twseBdCache=await fetchTWSEJSON(TWSE_AP07_CI); return twseBdCache; }
+        function twseNum(v){ if(v===null||v===undefined||v==='') return null; const n=Number(v); return isNaN(n)?null:n; }
+        function twseQDate(year,q){ return (parseInt(year,10)-1911)+'Q'+q; }
+        // 損益表兜底：回 {date, eps, revenue, cost, grossProfit, netIncome, opInc, netInterestIncome, isFinance}
+        async function getFinTWSE(ticker, isFinance){
+            const arr=await loadTWSEFin(isFinance);
+            if(!arr||!arr.length) return null;
+            const row=arr.find(x=>x['公司代號']===ticker);
+            if(!row) return null;
+            const date=twseQDate(row['年度'],row['季別']);
+            if(isFinance){
+                return { date, isFinance:true,
+                    eps:twseNum(row['基本每股盈餘（元）']),
+                    revenue:twseNum(row['淨收益']),
+                    cost:null, grossProfit:null,
+                    netIncome:twseNum(row['本期稅後淨利（淨損）']),
+                    opInc:null,
+                    netInterestIncome:twseNum(row['利息淨收益']) };
+            }
+            return { date, isFinance:false,
+                eps:twseNum(row['基本每股盈餘（元）']),
+                revenue:twseNum(row['營業收入']),
+                cost:twseNum(row['營業成本']),
+                grossProfit:twseNum(row['營業毛利（毛損）']),
+                netIncome:twseNum(row['本期淨利（淨損）']),
+                opInc:twseNum(row['營業利益（損失）']),
+                netInterestIncome:null };
+        }
+        // 資產負債表兜底：回 {date, isFinance, currentAssets, currentLiab, inventory, ar, ap, fixedAssets, totalAssets, totalLiab, equity}
+        async function getBalanceSheetTWSE(ticker, isFinance){
+            const arr=await loadTWSEBd(isFinance);
+            if(!arr||!arr.length) return null;
+            const row=arr.find(x=>x['公司代號']===ticker);
+            if(!row) return null;
+            const date=twseQDate(row['年度'],row['季別']);
+            if(isFinance){
+                return { date, isFinance:true,
+                    cash:twseNum(row['現金及約當現金']),
+                    currentLiab:twseNum(row['存款及匯款']),
+                    totalAssets:twseNum(row['資產總計']),
+                    totalLiab:twseNum(row['負債總計']),
+                    equity:twseNum(row['權益總計']) };
+            }
+            return { date, isFinance:false,
+                currentAssets:twseNum(row['流動資產']),
+                currentLiab:twseNum(row['流動負債']),
+                inventory:null, ar:null, ap:null,
+                fixedAssets:twseNum(row['非流動資產']),
+                totalAssets:twseNum(row['資產總額']),
+                totalLiab:twseNum(row['負債總額']),
+                equity:twseNum(row['權益總額']) };
+        }
+        // 財務比率（結合損益表 + 資產負債表，支援金融業，TTM 口徑；FinMind 失敗自動走 TWSE 兜底）
         async function getRatios(ticker, isFinance){
-            const [bs, fin, perArr]=await Promise.all([getBalanceSheet(ticker,isFinance),getFin(ticker,isFinance),getJSON('TaiwanStockPER',ticker,30)]);
+            const [bsFin, bsTW, finFin, finTW, perArr]=await Promise.all([
+                getBalanceSheet(ticker,isFinance), getBalanceSheetTWSE(ticker,isFinance),
+                getFin(ticker,isFinance), getFinTWSE(ticker,isFinance),
+                getJSON('TaiwanStockPER',ticker,30)]);
+            const bs = bsFin || bsTW;
+            const fin = finFin || finTW;
             if(!bs) return null;
             const per=(perArr&&perArr.length)?perArr[perArr.length-1]:null;
             const finRows=await getJSON('TaiwanStockFinancialStatements',ticker,400);
@@ -284,9 +356,19 @@
                 netTTM=sum(isFinance?'IncomeAfterTax':'IncomeAfterTaxes');
                 netIntTTM=sum('NetInterestIncome');
             }
+            // FinMind TTM 取不到（限流/無資料）→ 用 TWSE 單季兜底（標記非 TTM）
+            let ttmUsed = !!(finRows&&finRows.length);
+            if(!ttmUsed && fin){
+                revTTM = fin.revenue!=null?fin.revenue:revTTM;
+                costTTM = fin.cost!=null?fin.cost:costTTM;
+                netTTM = fin.netIncome!=null?fin.netIncome:netTTM;
+                netIntTTM = fin.netInterestIncome!=null?fin.netInterestIncome:netIntTTM;
+            }
             const rev=revTTM, cost=costTTM, netIncome=netTTM;
             const N_A='金融業不適用';
-            const r={ date:bs.date, isFinance, ttm:true };
+            const r={ date:bs.date, isFinance, ttm:ttmUsed };
+            // 營業利益：FinMind 用 OperatingIncome；TWSE 兜底用營業利益（損失）
+            const opInc = (fin&&fin.opInc!=null)?fin.opInc:netIntTTM;
             // 1. 流動性
             if(isFinance){
                 r.cashRatio=(bs.cash&&bs.totalLiab)?bs.cash/bs.totalLiab*100:null;
@@ -321,8 +403,8 @@
             }else{
                 const gp=(rev&&cost!=null)?rev-cost:null;
                 if(gp!=null&&rev) r.grossMargin=gp/rev*100;
-                const opInc=netIntTTM; // 金融業外，營業利益用損益表 OperatingIncome 較準；此處 rev-cost 近似營業成本，營業利益另取
-                if(opInc!=null&&rev) r.opMargin=opInc/rev*100;
+                const opInc2=opInc; // 金融業外，營業利益用 opInc（FinMind=OperatingIncome / TWSE=營業利益）
+                if(opInc2!=null&&rev) r.opMargin=opInc2/rev*100;
                 if(netIncome!=null&&rev) r.netMargin=netIncome/rev*100;
             }
             if(netIncome!=null&&bs.totalAssets) r.roa=netIncome/bs.totalAssets*100;
@@ -586,7 +668,7 @@
                         <div>日線行情（FinMind 與證交所 TWSE 兜底）目前皆無法取得，可能為 API 額度限制或網路暫時中斷。本頁僅提供公司基本資料與盤中即時價（見下方即時報價）；技術指標、財務比率與同業基準暫不顯示。請稍後再試，或於非高峰時段重新查詢。</div>
                     </div>
                     <div class="disclaimer">【免責聲明】…</div>
-                    <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v16 · 最後更新 2026-07-11</div>`;
+                    <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v17 · 最後更新 2026-07-11</div>`;
                 return partial;
             }
             const last=finalRows[finalRows.length-1], prev=finalRows.length>1?finalRows[finalRows.length-2]:last;
@@ -623,7 +705,7 @@
             const ratioHtml = ratios ? (()=>{
                 const R=ratios;
                 const N_A='金融業不適用';
-                const asof = `資料時間點：${R.date} 財報（TTM 近四季加總）`;
+                const asof = R.ttm ? `資料時間點：${R.date} 財報（TTM 近四季加總）` : `資料時間點：${R.date} 財報（TWSE OpenAPI 單季，FinMind 限流中兜底）`;
                 const f2=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2));
                 const f1=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(1));
                 const pct=v=>v===null||v===undefined?'—':(typeof v==='string'?v:v.toFixed(2)+'%');
@@ -750,7 +832,7 @@
                 </div>
                 ${matchHtml}
                 <div class="disclaimer">【免責聲明】本網頁為「投資資訊分析」工具，所有內容（含技術指標、財務比率、問卷推薦）僅供教育與參考之用，<b>不構成任何證券買賣邀約、招攬或個別投資建議</b>。本工具未考量使用者個人財務狀況、投資目標與風險屬性之全貌，所生成之資訊不具個別化顧問性質。投資有風險，過去績效不代表未來表現；財務比率多基於公開財報（TTM 近四季加總）與 FinMind 公開 API 推算，可能存在時間落差、資料缺漏或估算誤差，同業基準因樣本有限僅供粗略參照。使用者應自行審慎評估，必要時諮詢合格證券投資顧問或財務顧問，並依自身風險承受度獨立決策，盈虧自負。</div>
-                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v16 · 最後更新 2026-07-11</div>
+                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v17 · 最後更新 2026-07-11</div>
             `;
             return html;
         }
