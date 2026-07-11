@@ -333,13 +333,13 @@
             const map=await loadIndustryMap();
             if(!map || !map[ticker]) return null;
             const industry=map[ticker];
-            // 同業代號（排除自身，最多取 40 檔以控時效）
+            // 同業代號（排除自身，最多取 80 檔以控時效）
             let peers=Object.entries(map).filter(([c,ind])=>ind===industry && c!==ticker).map(([c])=>c);
             if(peers.length<3) return { median:null, n:peers.length, industry, note:'同業樣本過少' };
-            if(peers.length>40) peers=peers.sort(()=>Math.random()-0.5).slice(0,40);
+            if(peers.length>80) peers=peers.sort(()=>Math.random()-0.5).slice(0,80);
             try{
                 const pers=await Promise.all(peers.map(c=>getJSON('TaiwanStockPER',c,1)));
-                const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0&&v<200);
+                const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0&&v<500);
                 if(vals.length<3) return { median:null, n:vals.length, industry, note:'有效樣本過少' };
                 vals.sort((a,b)=>a-b);
                 const mid=vals[Math.floor(vals.length/2)];
