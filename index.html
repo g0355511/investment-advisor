@@ -321,18 +321,21 @@
             }
             return r;
         }
-        // 同業基準：取資料庫同產業其他標的之 PER 中位數（樣本有限，僅供參考）
-        async function getIndustryBench(industry){
-            if(!industry || !STOCK_DB) return null;
-            const peerCodes=STOCK_DB.filter(s=>s.industry===industry).map(s=>s.code);
-            if(peerCodes.length<2) return null;
+        // 同業基準：先從 STOCK_DB 用 ticker 取自身產業，再比對同業（避免 FinMind 產業名與本地庫不一致）
+        async function getIndustryBench(ticker){
+            if(!STOCK_DB) return null;
+            const self=STOCK_DB.find(s=>s.code===ticker);
+            if(!self) return null;
+            const industry=self.industry;
+            const peerCodes=STOCK_DB.filter(s=>s.industry===industry && s.code!==ticker).map(s=>s.code);
+            if(peerCodes.length<1) return null;
             try{
                 const pers=await Promise.all(peerCodes.map(c=>getJSON('TaiwanStockPER',c,1)));
                 const vals=pers.map(p=>p&&p.length?p[p.length-1].PER:null).filter(v=>v&&v>0);
-                if(vals.length<2) return null;
+                if(vals.length<1) return null;
                 vals.sort((a,b)=>a-b);
                 const mid=vals[Math.floor(vals.length/2)];
-                return { median:mid, n:vals.length };
+                return { median:mid, n:vals.length, industry };
             }catch(e){ return null; }
         }
         function buildAdvice({close,prevClose,per,ma20,ma60,rsiVal,ratios,industry,bench,volatility}){
@@ -375,7 +378,7 @@
             // 評價（本益比/殖利率）
             if(per&&per.PER){
                 let benchTxt='';
-                if(bench&&bench.median){ benchTxt=`（同業中位數約 ${bench.median.toFixed(1)}，樣本 ${bench.n} 檔）`; }
+                if(bench&&bench.median){ benchTxt=`（同業「${bench.industry}」中位數約 ${bench.median.toFixed(1)}，樣本 ${bench.n} 檔）`; }
                 if(per.PER<15){tags.push(['本益比偏低','tag-pos']);reasons.push(`【評價】本益比 ${per.PER} 相對低位，具價值投資吸引力。${benchTxt}`);fundScore+=1;}
                 else if(per.PER>30){tags.push(['本益比偏高','tag-warn']);reasons.push(`【評價】本益比 ${per.PER} 偏高，須注意評價合理性。${benchTxt}`);fundScore-=1;}
                 else{tags.push(['本益比合理','tag-neu']);reasons.push(`【評價】本益比 ${per.PER} 中性區間，估值尚稱合理。${benchTxt}`);}
@@ -405,7 +408,7 @@
             let ratios=null, bench=null, volatility=null;
             const industryNow = info ? info.industry_category : '—';
             try{ ratios=await getRatios(ticker,isFinance); }catch(e){ ratios=null; }
-            try{ bench=await getIndustryBench(industryNow); }catch(e){ bench=null; }
+            try{ bench=await getIndustryBench(ticker); }catch(e){ bench=null; }
             if(!rows||!rows.length) throw new Error('no_data');
             const last=rows[rows.length-1], prev=rows.length>1?rows[rows.length-2]:last;
             const closes=rows.map(r=>r.close);
