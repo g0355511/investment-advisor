@@ -132,6 +132,7 @@
     <script>
         const API='https://api.finmindtrade.com/api/v4/data';
         const REALTIME_PROXY='https://twse-realtime-proxy.g0355511.workers.dev/?code=';
+        const TWSE_FIN_PROXY='https://twse-realtime-proxy.g0355511.workers.dev/fin?url=';
         const fmtDate=d=>d.toISOString().slice(0,10);
         async function getJSON(dataset,ticker,days){
             const end=fmtDate(new Date());
@@ -276,8 +277,9 @@
         const TWSE_AP07_FH='https://openapi.twse.com.tw/v1/opendata/t187ap07_L_fh';
         let twseFinCache=null, twseBdCache=null, twseFinHCache=null, twseBdHCache=null;
         async function fetchTWSEJSON(url){
+            const proxied=TWSE_FIN_PROXY+encodeURIComponent(url);
             const ctrl=new AbortController(); const t=setTimeout(()=>ctrl.abort(),15000);
-            try{ const r=await fetch(url,{signal:ctrl.signal}); clearTimeout(t); if(!r.ok) return null; const j=await r.json(); return Array.isArray(j)?j:null; }
+            try{ const r=await fetch(proxied,{signal:ctrl.signal}); clearTimeout(t); if(!r.ok) return null; const j=await r.json(); return Array.isArray(j)?j:null; }
             catch(e){ clearTimeout(t); console.warn('TWSE 財報 fetch 失敗',url,e.message); return null; }
         }
         async function loadTWSEFin(isFinance){ if(isFinance){ if(!twseFinHCache) twseFinHCache=await fetchTWSEJSON(TWSE_AP06_FH); return twseFinHCache; } if(!twseFinCache) twseFinCache=await fetchTWSEJSON(TWSE_AP06_CI); return twseFinCache; }
@@ -668,7 +670,7 @@
                         <div>日線行情（FinMind 與證交所 TWSE 兜底）目前皆無法取得，可能為 API 額度限制或網路暫時中斷。本頁僅提供公司基本資料與盤中即時價（見下方即時報價）；技術指標、財務比率與同業基準暫不顯示。請稍後再試，或於非高峰時段重新查詢。</div>
                     </div>
                     <div class="disclaimer">【免責聲明】…</div>
-                    <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v17b · 最後更新 2026-07-11</div>`;
+                    <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v17c · 最後更新 2026-07-11</div>`;
                 return partial;
             }
             const last=finalRows[finalRows.length-1], prev=finalRows.length>1?finalRows[finalRows.length-2]:last;
@@ -832,7 +834,7 @@
                 </div>
                 ${matchHtml}
                 <div class="disclaimer">【免責聲明】本網頁為「投資資訊分析」工具，所有內容（含技術指標、財務比率、問卷推薦）僅供教育與參考之用，<b>不構成任何證券買賣邀約、招攬或個別投資建議</b>。本工具未考量使用者個人財務狀況、投資目標與風險屬性之全貌，所生成之資訊不具個別化顧問性質。投資有風險，過去績效不代表未來表現；財務比率多基於公開財報（TTM 近四季加總）與 FinMind 公開 API 推算，可能存在時間落差、資料缺漏或估算誤差，同業基準因樣本有限僅供粗略參照。使用者應自行審慎評估，必要時諮詢合格證券投資顧問或財務顧問，並依自身風險承受度獨立決策，盈虧自負。</div>
-                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v17b · 最後更新 2026-07-11</div>
+                <div style="text-align:right;font-size:11px;color:#c0c8d0;margin-top:6px;">版本 v17c · 最後更新 2026-07-11</div>
             `;
             return html;
         }
