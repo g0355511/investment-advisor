@@ -493,15 +493,15 @@
                         mi('淨利差 (NIM)',pct(R.nim),'利息淨收益 ÷ 總資產'),
                         mi('利息淨收益率',pct(R.netIntRatio),'利息淨收益 ÷ 營收'),
                         mi('純益率',pct(R.netMargin),'稅後淨利 ÷ 營收'),
-                        mi('總資產報酬率 (ROA)',pct(R.roa),'稅後淨利 ÷ 總資產'),
-                        mi('權益報酬率 (ROE)',pct(R.roe),'稅後淨利 ÷ 權益')
+                        mi('總資產報酬率 (ROA)',pct(R.roa),'TTM 稅後淨利 ÷ 期末總資產（分母未年化，數值偏高）'),
+                        mi('權益報酬率 (ROE)',pct(R.roe),'TTM 稅後淨利 ÷ 期末權益（分母未年化，數值偏高）')
                       ])
                     : sec('4. 獲利能力比率',[
                         mi('毛利率',pct(R.grossMargin),'(營收 − 銷貨成本) ÷ 營收'),
                         mi('營運利益率',pct(R.opMargin),'營業利益 ÷ 營收'),
                         mi('純益率',pct(R.netMargin),'稅後淨利 ÷ 營收'),
-                        mi('總資產報酬率 (ROA)',pct(R.roa),'稅後淨利 ÷ 總資產'),
-                        mi('權益報酬率 (ROE)',pct(R.roe),'稅後淨利 ÷ 權益')
+                        mi('總資產報酬率 (ROA)',pct(R.roa),'TTM 稅後淨利 ÷ 期末總資產（分母未年化，數值偏高）'),
+                        mi('權益報酬率 (ROE)',pct(R.roe),'TTM 稅後淨利 ÷ 期末權益（分母未年化，數值偏高）')
                       ]);
                 return `
                 <div class="info-box">
